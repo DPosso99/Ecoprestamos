@@ -1,0 +1,283 @@
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Equivalente de Backend/routes/user.routes.js + Controllers/User.controllers.js.
+ */
+class PMI_Rest_Usuarios
+{
+    const DEFAULT_TEMP_PASSWORD = 'Medialab2026!';
+
+    public static function register_routes()
+    {
+        register_rest_route('pmi/v1', '/users', array(
+            array(
+                'methods' => 'GET',
+                'callback' => array(__CLASS__, 'get_users'),
+                'permission_callback' => array('PMI_Auth', 'permission_worker'),
+            ),
+            array(
+                'methods' => 'POST',
+                'callback' => array(__CLASS__, 'create_user'),
+                'permission_callback' => array(__CLASS__, 'permission_create_user'),
+            ),
+        ));
+
+        register_rest_route('pmi/v1', '/users/(?P<correo>[^/]+)', array(
+            array(
+                'methods' => 'GET',
+                'callback' => array(__CLASS__, 'get_user'),
+                'permission_callback' => array('PMI_Auth', 'permission_logged_in'),
+            ),
+            array(
+                'methods' => 'PUT',
+                'callback' => array(__CLASS__, 'edit_user'),
+                'permission_callback' => array(__CLASS__, 'permission_edit_user'),
+            ),
+            array(
+                'methods' => 'DELETE',
+                'callback' => array(__CLASS__, 'delete_user'),
+                'permission_callback' => array('PMI_Auth', 'permission_worker'),
+            ),
+        ));
+
+        register_rest_route('pmi/v1', '/login', array(
+            'methods' => 'POST',
+            'callback' => array(__CLASS__, 'login'),
+            'permission_callback' => array('PMI_Auth', 'permission_public'),
+        ));
+
+        register_rest_route('pmi/v1', '/logout', array(
+            'methods' => 'POST',
+            'callback' => array(__CLASS__, 'logout'),
+            'permission_callback' => array('PMI_Auth', 'permission_public'),
+        ));
+    }
+
+    /**
+     * El auto-registro de un Estudiante es publico; que un Trabajador cree
+     * una cuenta para otra persona (adminCreated=true) exige sesion + nonce
+     * + rol Trabajador.
+     */
+    public static function permission_create_user(WP_REST_Request $request)
+    {
+        $body = $request->get_json_params();
+        if (!empty($body['adminCreated'])) {
+            return PMI_Auth::permission_worker($request);
+        }
+        return true;
+    }
+
+    /**
+     * Cualquier usuario logueado puede editar su propio perfil; cambiar el
+     * perfil de otra persona exige rol Trabajador (se valida en el handler).
+     */
+    public static function permission_edit_user(WP_REST_Request $request)
+    {
+        return PMI_Auth::permission_logged_in($request);
+    }
+
+    public static function get_users()
+    {
+        global $wpdb;
+        $rows = $wpdb->get_results('SELECT correo, numero, rol, nombre, baneado, trabajo FROM ' . PMI_DB::usuario(), ARRAY_A);
+        return rest_ensure_response($rows);
+    }
+
+    public static function get_user(WP_REST_Request $request)
+    {
+        global $wpdb;
+        $correo = $request->get_param('correo');
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare('SELECT correo, numero, rol, nombre, baneado, trabajo FROM ' . PMI_DB::usuario() . ' WHERE correo = %s', $correo),
+            ARRAY_A
+        );
+
+        if (!$row) {
+            return new WP_Error('pmi_not_found', 'Usuario no encontrado', array('status' => 404));
+        }
+
+        return rest_ensure_response($row);
+    }
+
+    public static function create_user(WP_REST_Request $request)
+    {
+        global $wpdb;
+        $body = $request->get_json_params();
+
+        $correo = sanitize_email($body['Correo'] ?? '');
+        $numero = sanitize_text_field($body['numero'] ?? '');
+        $contrasena = $body['Contraseña'] ?? $body['Contrasena'] ?? null;
+        $nombre = sanitize_text_field($body['Nombre'] ?? '');
+        $admin_created = !empty($body['adminCreated']);
+
+        if (!$correo || !$nombre) {
+            return new WP_Error('pmi_bad_request', 'Correo y Nombre son obligatorios', array('status' => 400));
+        }
+
+        // El auto-registro publico SIEMPRE crea un Estudiante sin banear,
+        // sin importar lo que mande el body: Rol/Baneado/Trabajo solo se
+        // confian del cliente cuando adminCreated=true, porque esa rama ya
+        // esta protegida por permission_create_user() (exige rol Trabajador).
+        // De lo contrario cualquier visitante anonimo podria auto-asignarse
+        // Rol=Trabajador con un simple POST.
+        if ($admin_created) {
+            $rol = sanitize_text_field($body['Rol'] ?? 'Estudiante');
+            $baneado = !empty($body['Baneado']) ? 1 : 0;
+            $trabajo = isset($body['Trabajo']) ? sanitize_text_field($body['Trabajo']) : null;
+        } else {
+            $rol = 'Estudiante';
+            $baneado = 0;
+            $trabajo = null;
+        }
+
+        $hash = password_hash($contrasena ?: self::DEFAULT_TEMP_PASSWORD, PASSWORD_BCRYPT);
+
+        $existing = $wpdb->get_var($wpdb->prepare('SELECT correo FROM ' . PMI_DB::usuario() . ' WHERE correo = %s', $correo));
+        if ($existing) {
+            return new WP_Error('pmi_conflict', 'El correo ya existe', array('status' => 409));
+        }
+
+        $inserted = $wpdb->insert(
+            PMI_DB::usuario(),
+            array(
+                'correo' => $correo,
+                'numero' => $numero,
+                'contrasena' => $hash,
+                'rol' => $rol,
+                'nombre' => $nombre,
+                'baneado' => $baneado,
+                'trabajo' => $trabajo,
+            ),
+            array('%s', '%s', '%s', '%s', '%s', '%d', '%s')
+        );
+
+        if ($inserted === false) {
+            return new WP_Error('pmi_server_error', 'Error al crear el usuario', array('status' => 500));
+        }
+
+        if (!$admin_created) {
+            PMI_Auth::issue_session_cookie($correo);
+        }
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare('SELECT correo, numero, rol, nombre, baneado, trabajo FROM ' . PMI_DB::usuario() . ' WHERE correo = %s', $correo),
+            ARRAY_A
+        );
+
+        return rest_ensure_response($row);
+    }
+
+    public static function edit_user(WP_REST_Request $request)
+    {
+        global $wpdb;
+        $correo = $request->get_param('correo');
+        $body = $request->get_json_params();
+
+        $current = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . PMI_DB::usuario() . ' WHERE correo = %s', $correo), ARRAY_A);
+        if (!$current) {
+            return new WP_Error('pmi_not_found', 'Usuario no encontrado', array('status' => 404));
+        }
+
+        $acting_user = PMI_Auth::current_user();
+        $is_self = $acting_user && $acting_user['correo'] === $correo;
+        $is_worker = PMI_Auth::is_worker();
+
+        if (!$is_self && !$is_worker) {
+            return new WP_Error('pmi_forbidden', 'No autorizado para editar este usuario', array('status' => 403));
+        }
+
+        // Solo un Trabajador puede cambiar Rol/Baneado/Trabajo de un usuario.
+        $rol = $current['rol'];
+        $baneado = $current['baneado'];
+        $trabajo = $current['trabajo'];
+        if ($is_worker) {
+            $rol = array_key_exists('Rol', $body) ? sanitize_text_field($body['Rol']) : $rol;
+            $baneado = array_key_exists('Baneado', $body) ? (int) (bool) $body['Baneado'] : $baneado;
+            $trabajo = array_key_exists('Trabajo', $body) ? $body['Trabajo'] : $trabajo;
+        }
+
+        $numero = array_key_exists('numero', $body) ? sanitize_text_field($body['numero']) : $current['numero'];
+        $nombre = array_key_exists('Nombre', $body) ? sanitize_text_field($body['Nombre']) : $current['nombre'];
+
+        $contrasena_plain = $body['Contraseña'] ?? $body['Contrasena'] ?? null;
+        $hash = $current['contrasena'];
+        if ($contrasena_plain && !password_verify($contrasena_plain, $current['contrasena'])) {
+            $hash = password_hash($contrasena_plain, PASSWORD_BCRYPT);
+        }
+
+        $wpdb->update(
+            PMI_DB::usuario(),
+            array(
+                'numero' => $numero,
+                'contrasena' => $hash,
+                'rol' => $rol,
+                'nombre' => $nombre,
+                'baneado' => $baneado,
+                'trabajo' => $trabajo,
+            ),
+            array('correo' => $correo),
+            array('%s', '%s', '%s', '%s', '%d', '%s'),
+            array('%s')
+        );
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare('SELECT correo, numero, rol, nombre, baneado, trabajo FROM ' . PMI_DB::usuario() . ' WHERE correo = %s', $correo),
+            ARRAY_A
+        );
+
+        return rest_ensure_response($row);
+    }
+
+    public static function delete_user(WP_REST_Request $request)
+    {
+        global $wpdb;
+        $correo = $request->get_param('correo');
+
+        $wpdb->hide_errors();
+        $deleted = $wpdb->delete(PMI_DB::usuario(), array('correo' => $correo), array('%s'));
+        $wpdb->show_errors();
+
+        if ($wpdb->last_error) {
+            return new WP_Error('pmi_conflict', 'No se puede eliminar el usuario porque tiene prestamos asociados', array('status' => 409));
+        }
+
+        if (!$deleted) {
+            return new WP_Error('pmi_not_found', 'Usuario no encontrado', array('status' => 404));
+        }
+
+        return rest_ensure_response(array('message' => 'Usuario eliminado'));
+    }
+
+    public static function login(WP_REST_Request $request)
+    {
+        global $wpdb;
+        $body = $request->get_json_params();
+        $correo = sanitize_email($body['Correo'] ?? '');
+        $contrasena = $body['Contraseña'] ?? $body['Contrasena'] ?? '';
+
+        $user = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . PMI_DB::usuario() . ' WHERE correo = %s', $correo), ARRAY_A);
+
+        if (!$user || !password_verify($contrasena, $user['contrasena'])) {
+            return new WP_Error('pmi_bad_credentials', 'Correo o contrasena incorrectos', array('status' => 401));
+        }
+
+        PMI_Auth::issue_session_cookie($user['correo']);
+
+        return rest_ensure_response(array(
+            'Correo' => $user['correo'],
+            'Nombre' => $user['nombre'],
+            'Rol' => $user['rol'],
+            'Baneado' => (int) $user['baneado'],
+        ));
+    }
+
+    public static function logout()
+    {
+        PMI_Auth::clear_session_cookie();
+        return rest_ensure_response(array('message' => 'Sesion cerrada'));
+    }
+}
