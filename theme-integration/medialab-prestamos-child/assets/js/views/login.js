@@ -11,6 +11,7 @@ export async function renderLogin(root) {
       <div class="pmi-auth-shell">
         <div class="pmi-auth-box">
           <div style="text-align:center; margin-bottom:16px;">
+            <img src="https://ecolabs.eafit.edu.co/wp-content/uploads/2026/07/Logo-EAFIT-azul.png" alt="EAFIT" style="max-width:180px; height:auto; margin-bottom:12px;" />
             <div class="pmi-h1">Medialab</div>
             <div class="pmi-muted pmi-text-sm">Sistema de prestamos</div>
           </div>
