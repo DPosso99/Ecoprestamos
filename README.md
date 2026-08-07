@@ -20,9 +20,9 @@ copiado de ese repo — es una reimplementación completa:
 ## Estructura
 
 ```
-prestamos-wordpress/
-├── plugin/                                Plugin de WordPress (backend)
-│   ├── prestamos-inventario.php              Archivo principal del plugin
+Ecoprestamos-WP/
+├── ecoprestamos-plugin/                   Plugin de WordPress (backend)
+│   ├── ecoprestamos-plugin.php               Archivo principal del plugin
 │   ├── includes/                             Clases: tablas, auth, rutas REST, logica de negocio
 │   │   ├── class-pmi-activator.php              Crea tablas/triggers/FKs en la activacion
 │   │   ├── class-pmi-auth.php                   Sesion (cookie propia) + nonce de WP
@@ -31,18 +31,18 @@ prestamos-wordpress/
 │   │   └── class-pmi-rest-*.php                 Controladores REST: usuarios, recursos, prestamos, detalles, busqueda
 │   └── sql/                                  Definiciones de tabla (dbDelta), triggers y FKs
 │
-├── theme-integration/
+├── ecoprestamos-theme/                    Tema de WordPress (frontend, listo para usar)
 │   ├── README.md                             Como instalar/activar el tema
-│   └── medialab-prestamos-child/             Tema hijo de WordPress (frontend, listo para usar)
-│       ├── functions.php                        Registra el shortcode [prestamos_inventario_app]
-│       ├── page-prestamos-template.php           Plantilla de pagina de ancho completo
-│       ├── style.css                             Cabecera del tema hijo (Template: twentytwentyfive)
-│       └── assets/
-│           ├── css/app.css                       Sistema de diseño (tokens de color, componentes)
-│           └── js/                               App JS (modulos ES, sin build)
-│               ├── app.js, router.js, state.js, api.js, dom.js
-│               ├── components/                      topbar.js, modal.js
-│               └── views/                            una vista por pantalla (ver tabla abajo)
+│   ├── functions.php                         Encola los assets de la app (pmi_render_app())
+│   ├── index.php                             Plantilla principal: muestra la app en cualquier URL del sitio
+│   ├── ecoprestamos-theme.php                Plantilla alternativa de pagina de ancho completo ("Template Name")
+│   ├── style.css                             Cabecera del tema (sin tema padre: Template en blanco, o Hello Elementor)
+│   └── assets/
+│       ├── css/app.css                       Sistema de diseño (tokens de color, componentes)
+│       └── js/                               App JS (modulos ES, sin build)
+│           ├── app.js, router.js, state.js, api.js, dom.js
+│           ├── components/                      topbar.js, modal.js
+│           └── views/                            una vista por pantalla (ver tabla abajo)
 │
 ├── README.md                              Este archivo
 └── NOTES.md                               Decisiones de migracion, equivalencias, bugs encontrados y corregidos
@@ -65,11 +65,13 @@ prestamos-wordpress/
 
 ## Qué hace el tema
 
-Un tema hijo (`medialab-prestamos-child`) que registra el shortcode
-`[prestamos_inventario_app]`. Al insertarlo en cualquier página, monta una
-app de una sola página (SPA) con ruteo por hash (`#/catalogo`, `#/ops`,
-etc.) — por eso funciona igual sin importar en qué URL o nivel de
-anidación viva la página (`/prestamos/`, `/ecolabs/ecoprestamos/`, etc.).
+Un tema **independiente** (sin tema padre; también puede usarse con
+**Hello Elementor** como padre si se prefiere) que muestra la app
+directamente al activar el tema — **no hace falta ningún shortcode**.
+`index.php` monta la app de una sola página (SPA) con ruteo por hash
+(`#/catalogo`, `#/ops`, etc.) en cualquier URL del sitio — por eso funciona
+igual sin importar en qué URL o nivel de anidación viva la página
+(`/prestamos/`, `/ecolabs/ecoprestamos/`, etc.).
 
 Pantallas incluidas:
 
@@ -89,22 +91,23 @@ Pantallas incluidas:
 
 ## Instalación
 
-1. Copia la carpeta `plugin/` a `wp-content/plugins/prestamos-inventario/`
-   y actívalo desde **Plugins → Plugins instalados**. Si el usuario de la
-   base de datos no tiene privilegios `TRIGGER` o para agregar
-   `FOREIGN KEY` (común en algunos hostings compartidos), verás un aviso
-   en el admin explicando qué falló — la app sigue funcionando, solo sin
-   esa validación extra a nivel de base de datos.
-2. Copia `theme-integration/medialab-prestamos-child/` a
-   `wp-content/themes/medialab-prestamos-child/` y actívalo (Apariencia →
-   Temas). Es un tema hijo de **Twenty Twenty-Five**; si tu sitio usa otro
-   tema, ajusta la línea `Template:` en `style.css`.
-3. Crea una página, pon el shortcode `[prestamos_inventario_app]` en el
-   contenido, y en el panel derecho del editor selecciona la plantilla
-   **"Prestamos Inventario (App)"** (ancho completo, sin el header/footer
-   del tema). Publícala.
+1. Copia la carpeta `ecoprestamos-plugin/` a
+   `wp-content/plugins/ecoprestamos-plugin/` y actívalo desde
+   **Plugins → Plugins instalados**. Si el usuario de la base de datos no
+   tiene privilegios `TRIGGER` o para agregar `FOREIGN KEY` (común en
+   algunos hostings compartidos), verás un aviso en el admin explicando qué
+   falló — la app sigue funcionando, solo sin esa validación extra a nivel
+   de base de datos.
+2. Copia `ecoprestamos-theme/` a `wp-content/themes/ecoprestamos-theme/` y
+   actívalo (Apariencia → Temas). No tiene tema padre por defecto; si
+   prefieres usarlo como hijo de **Hello Elementor**, agrega
+   `Template: hello-elementor` en la cabecera de `style.css` (requiere
+   tener Hello Elementor instalado en el sitio).
+3. Listo — al activar el tema, la app queda disponible de inmediato en
+   cualquier URL del sitio (`index.php` la muestra directamente, sin
+   necesidad de crear una página ni insertar ningún shortcode).
 
-Detalles y variantes en [`theme-integration/README.md`](theme-integration/README.md).
+Detalles y variantes en [`ecoprestamos-theme/README.md`](ecoprestamos-theme/README.md).
 
 ### Probar localmente (Local by Flywheel, MAMP, etc.)
 
@@ -119,5 +122,5 @@ publicar cambios en el frontend (es JavaScript plano servido tal cual).
   encontrados y corregidos durante las pruebas (incluye uno heredado del
   proyecto original: un trigger de MySQL que nunca marcaba un recurso
   como "Ocupado").
-- [`theme-integration/README.md`](theme-integration/README.md) — cómo
+- [`ecoprestamos-theme/README.md`](ecoprestamos-theme/README.md) — cómo
   instalar y activar el tema paso a paso.

@@ -4,7 +4,7 @@
  * Description: Backend de registro de prestamos y manejo de inventario, migrado desde una app Node/Express+React a un plugin de WordPress con tablas SQL propias ($wpdb + dbDelta) y una API REST bajo /wp-json/pmi/v1/.
  * Version: 1.0.0
  * Author: Medialab
- * Text Domain: prestamos-inventario
+ * Text Domain: ecoprestamos-plugin
  * Requires at least: 6.2
  * Requires PHP: 7.4
  */

@@ -10,7 +10,7 @@ Se eligio un prefijo propio (`pmi_` = Prestamos Medialab Inventario) para no
 generar confusion con las tablas nativas de WordPress (`wp_users`, etc.),
 aunque no hay colision real de nombres.
 
-| Original (`Backend/Database/init.sql`) | WordPress (`plugin/sql/001-tables.sql`) | Cambios |
+| Original (`Backend/Database/init.sql`) | WordPress (`ecoprestamos-plugin/sql/001-tables.sql`) | Cambios |
 |---|---|---|
 | `usuario` (PK `Correo`) | `pmi_usuario` (PK `correo`) | Columnas renombradas a snake_case ASCII: `Correo`→`correo`, `Contraseña`→`contrasena`, `Rol`→`rol`, `Nombre`→`nombre`, `Baneado`→`baneado`, `Trabajo`→`trabajo`. Se evita la eñe en el nombre de columna por portabilidad entre configuraciones de charset/collation de distintos hostings. |
 | `recurso` (PK `idRecurso`) | `pmi_recurso` (PK `id_recurso`) | Mismo renombrado a snake_case. `Imagen`/`Imagen_tipo` se mantienen como `LONGBLOB`/`varchar` en la fila (no se movio a la Media Library de WP), igual que el original. |
@@ -128,7 +128,7 @@ correctamente si WordPress vive en un subdirectorio/subsitio).
 `[filas, metadataDeColumnas]` en vez de solo `filas` (por eso el frontend
 original hace `const [rows] = await res.json()`). El plugin de WordPress
 corrige eso y devuelve directamente el arreglo de filas — el frontend
-propio (`theme-integration/`) ya esta escrito contra esa forma correcta,
+propio (`ecoprestamos-theme/`) ya esta escrito contra esa forma correcta,
 no necesita ningun ajuste.
 
 ## Subida de imagenes
@@ -146,7 +146,7 @@ Node.js/npm para compilar cada vez, y el pedido explicito fue que todo
 viviera dentro de WordPress sin herramientas externas). En su lugar se
 reescribieron las mismas pantallas como una SPA en **JavaScript plano**
 (modulos ES nativos del navegador, sin bundler) dentro de
-`theme-integration/medialab-prestamos-child/assets/js/`:
+`ecoprestamos-theme/assets/js/`:
 
 - `router.js` — ruteo por **hash** (`#/catalogo`, `#/ops/ticket/123`, etc.),
   para que la app funcione igual sin importar la URL/anidacion real de la
