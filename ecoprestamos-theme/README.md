@@ -1,30 +1,29 @@
-# Integración del frontend en WordPress
+# Tema de WordPress (frontend)
 
-Esta carpeta contiene un **tema hijo de WordPress, listo para usar**
-([`medialab-prestamos-child/`](medialab-prestamos-child)) con el frontend
-completo de la app ya construido en JavaScript plano (sin React, sin
-Node.js, sin paso de build). Es hijo de **Twenty Twenty-Five** por
-defecto; si tu sitio usa otro tema, cambia la línea `Template:` en
-`medialab-prestamos-child/style.css`.
+Esta carpeta contiene un **tema de WordPress independiente, listo para
+usar**, con el frontend completo de la app ya construido en JavaScript
+plano (sin React, sin Node.js, sin paso de build). No tiene tema padre por
+defecto (`Template:` en blanco en `style.css`); si prefieres usarlo como
+hijo de **Hello Elementor**, agrega `Template: hello-elementor` a la
+cabecera de `style.css` (requiere tener Hello Elementor instalado en el
+sitio).
 
 ## Instalación
 
-1. Copia `medialab-prestamos-child/` a
-   `wp-content/themes/medialab-prestamos-child/` y actívalo (Apariencia →
-   Temas). Trae el shortcode `[prestamos_inventario_app]` ya registrado en
-   `functions.php`.
-2. Crea (o edita) una página de WordPress, pega el shortcode
-   `[prestamos_inventario_app]` en el contenido.
-3. En el panel derecho del editor de esa página, en **Plantilla**,
-   selecciona **"Prestamos Inventario (App)"**
-   ([`page-prestamos-template.php`](medialab-prestamos-child/page-prestamos-template.php)) —
-   sirve la app a pantalla completa, sin el header/footer del tema. Sin
-   este paso, la app queda encajada dentro del layout normal del tema
-   (columna angosta, con el ancho de contenido del tema padre).
-4. Publica la página. La URL puede tener cualquier nivel de anidación
-   (`/prestamos/`, `/ecolabs/ecoprestamos/`, etc.) — el ruteo interno de
-   la app es por hash (`#/catalogo`, `#/ops`, ...), así que no depende en
-   absoluto de la ruta real de la página.
+1. Copia esta carpeta a `wp-content/themes/ecoprestamos-theme/` y actívalo
+   (Apariencia → Temas).
+2. Listo. `index.php` muestra la app directamente en cualquier URL del
+   sitio — **no hace falta ningún shortcode** ni crear una página especial.
+   La URL puede tener cualquier nivel de anidación (`/prestamos/`,
+   `/ecolabs/ecoprestamos/`, etc.) — el ruteo interno de la app es por hash
+   (`#/catalogo`, `#/ops`, ...), así que no depende en absoluto de la ruta
+   real de la página.
+
+Si en cambio quieres mostrar la app solo dentro de una página puntual de un
+sitio que usa otro tema, usa la plantilla opcional
+[`ecoprestamos-theme.php`](ecoprestamos-theme.php) (aparece como
+**"Prestamos Inventario (App)"** en el selector de plantilla del editor de
+páginas) — sirve la app a pantalla completa, sin el header/footer del tema.
 
 No hay ningún paso de build, ni antes ni después de editar el código: los
 archivos en `assets/js/` se sirven directo al navegador como módulos ES
@@ -33,10 +32,11 @@ nativos (`<script type="module">`).
 ## Estructura del tema
 
 ```
-medialab-prestamos-child/
-├── style.css                      Cabecera del tema hijo
-├── functions.php                  Shortcode [prestamos_inventario_app] + enqueue de assets
-├── page-prestamos-template.php    Plantilla de pagina de ancho completo
+ecoprestamos-theme/
+├── style.css                      Cabecera del tema (sin tema padre, o Hello Elementor)
+├── functions.php                  pmi_render_app() + enqueue de assets
+├── index.php                      Plantilla principal: muestra la app en cualquier URL del sitio
+├── ecoprestamos-theme.php         Plantilla opcional de pagina de ancho completo ("Template Name")
 └── assets/
     ├── css/app.css                    Sistema de diseño (tokens de color, tarjetas, botones, etc.)
     └── js/

@@ -3,18 +3,16 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-add_action('wp_enqueue_scripts', function () {
-    wp_enqueue_style('medialab-parent-style', get_template_directory_uri() . '/style.css');
-});
-
 /**
- * [prestamos_inventario_app] monta el div donde la app JS hace mount.
- *
- * La app es JavaScript plano (modulos ES nativos, sin build/Node): vive en
- * assets/js/ de este tema y se carga directo con <script type="module">.
- * No depende del repo original de React en ningun momento.
+ * Encola siempre los assets de la app (tema de proposito unico: no hay
+ * ninguna pagina de este sitio que no deba mostrarla), enganchado al hook
+ * estandar wp_enqueue_scripts para que wp_head() los imprima a tiempo.
+ * Si se encolaran dentro del <body> (como hacia el shortcode original) los
+ * <link> de CSS quedarian fuera de wp_head() y nunca se imprimirian.
  */
-add_shortcode('prestamos_inventario_app', function () {
+add_action('wp_enqueue_scripts', function () {
+    wp_enqueue_style('ecoprestamos-theme-style', get_stylesheet_directory_uri() . '/style.css');
+
     $assets_uri = get_stylesheet_directory_uri() . '/assets';
     $version = defined('PMI_VERSION') ? PMI_VERSION : '1.0.0';
 
@@ -27,9 +25,17 @@ add_shortcode('prestamos_inventario_app', function () {
         'restUrl' => esc_url_raw(rest_url('pmi/v1/')),
         'nonce' => wp_create_nonce('wp_rest'),
     ));
-
-    return '<div id="root"></div>';
 });
+
+/**
+ * Imprime el contenedor donde la app JS hace mount. Se llama directamente
+ * desde las plantillas del tema (index.php, ecoprestamos-theme.php) para que
+ * la app este disponible con solo activar el tema, sin depender de que
+ * alguien inserte un shortcode en el contenido de una pagina.
+ */
+function pmi_render_app() {
+    echo '<div id="root"></div>';
+}
 
 /** Agrega type="module" al <script> encolado con wp_script_add_data(...,'type','module'). */
 add_filter('script_loader_tag', function ($tag, $handle) {
