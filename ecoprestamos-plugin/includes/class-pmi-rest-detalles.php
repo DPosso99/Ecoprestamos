@@ -73,7 +73,12 @@ class PMI_Rest_Detalles
                 if (stripos($wpdb->last_error, 'foreign key') !== false) {
                     return new WP_Error('pmi_bad_request', 'Uno o mas recursos no existen', array('status' => 400));
                 }
-                return new WP_Error('pmi_server_error', 'Error al agregar recursos al prestamo', array('status' => 500));
+                PMI_Error_Log::report(
+                    PMI_Rest_Usuarios::is_missing_table_error($wpdb->last_error) ? 'pmi_missing_table' : 'pmi_db_insert_error',
+                    'No se pudo agregar un detalle al prestamo ' . $id_prestamo . ': ' . $wpdb->last_error,
+                    array('endpoint' => 'POST /prestamos/' . $id_prestamo . '/detalles', 'sql_error' => $wpdb->last_error)
+                );
+                return new WP_Error('pmi_server_error', 'No se pudo agregar los recursos al prestamo por un problema tecnico. Ya se avisamos al equipo de Medialab.', array('status' => 500));
             }
         }
 

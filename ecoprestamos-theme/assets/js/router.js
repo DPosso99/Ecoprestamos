@@ -1,6 +1,7 @@
 import { store } from './state.js';
 import { api } from './api.js';
 import { topbarHtml, attachTopbar } from './components/topbar.js';
+import { loaderHtml } from './dom.js';
 
 import { renderLogin } from './views/login.js';
 import { renderCatalogo } from './views/catalogo.js';
@@ -63,17 +64,27 @@ async function ensureData() {
   await Promise.all([store.catalog.reload(), store.loans.reload(), store.users.reload()]);
 }
 
-// Vuelve a consultar al backend si el usuario sigue baneado, por si un
-// trabajador lo baneo despues de que esta sesion ya habia iniciado
-// (equivalente a router/Banear_Usuarios.tsx del proyecto original).
-async function refreshBanStatus() {
+// Vuelve a consultar al backend el usuario actual, por si algo cambio del
+// lado del servidor despues de que esta sesion ya habia iniciado: que lo
+// hayan baneado (equivalente a router/Banear_Usuarios.tsx del proyecto
+// original), o que un administrador le haya cambiado el Rol/Trabajo desde
+// wp-admin (Medialab Prestamos > Usuarios) -- sin esto, sessionStorage se
+// queda con el Rol viejo hasta que la persona vuelve a iniciar sesion, y
+// el home ("/") la sigue mandando a /catalogo en vez de /ops.
+async function refreshUserStatus() {
   if (!store.auth.user?.Correo) return;
   try {
     const row = await api.getUser(store.auth.user.Correo);
-    const baneado = Number(row.Baneado ?? row.baneado ?? 0);
-    if (baneado !== store.auth.user.Baneado) {
-      store.auth.user = { ...store.auth.user, Baneado: baneado };
-      sessionStorage.setItem('medialab_user', JSON.stringify(store.auth.user));
+    const next = {
+      ...store.auth.user,
+      Baneado: Number(row.Baneado ?? row.baneado ?? 0),
+      Rol: row.Rol ?? row.rol,
+      Trabajo: row.Trabajo ?? row.trabajo ?? null,
+      Nombre: row.Nombre ?? row.nombre,
+    };
+    if (JSON.stringify(next) !== JSON.stringify(store.auth.user)) {
+      store.auth.user = next;
+      sessionStorage.setItem('medialab_user', JSON.stringify(next));
     }
   } catch { /* si falla la consulta, no bloquear al usuario */ }
 }
@@ -109,13 +120,6 @@ async function render() {
 
   let { route, params } = match;
 
-  // Guard: entry ("/") redirige segun rol
-  if (route.guard === 'entry') {
-    if (!store.auth.isAuthed) { window.location.hash = '/login'; return; }
-    window.location.hash = store.auth.isWorker ? '/ops' : '/catalogo';
-    return;
-  }
-
   if (route.guard === 'public') {
     if (store.auth.isAuthed) { window.location.hash = store.auth.isWorker ? '/ops' : '/catalogo'; return; }
     root.innerHTML = '<div id="pmi-main"></div>';
@@ -123,23 +127,54 @@ async function render() {
     return;
   }
 
-  // Rutas protegidas
+  // A partir de aqui todas las rutas requieren sesion.
   if (!store.auth.isAuthed) { window.location.hash = '/login'; return; }
+
+  // Refresca Rol/Trabajo/Baneado desde el servidor ANTES de decidir nada
+  // basado en el rol: si un administrador cambio el Rol de esta persona
+  // desde wp-admin (Medialab Prestamos > Usuarios) mientras la sesion
+  // seguia abierta, el valor cacheado en sessionStorage queda desactualizado
+  // y sin este refresco el guard de "/" seguiria mandando a /catalogo aunque
+  // ya sea Trabajador, hasta que la persona cerrara sesion y volviera a
+  // entrar.
+  if (!dataLoaded) {
+    root.innerHTML = loaderHtml('Cargando tu informacion...');
+  }
+  await refreshUserStatus();
+
+  if (store.auth.user?.Baneado === 1) {
+    root.innerHTML = `<div class="pmi-shell"><div id="pmi-topbar-slot"></div><main class="pmi-container pmi-main" id="pmi-main"></main></div>`;
+    document.getElementById('pmi-topbar-slot').innerHTML = topbarHtml();
+    attachTopbar(document.getElementById('pmi-topbar-slot'));
+    renderBanned(document.getElementById('pmi-main'));
+    return;
+  }
+
+  // Guard: entry ("/") redirige segun rol (ya actualizado arriba)
+  if (route.guard === 'entry') {
+    window.location.hash = store.auth.isWorker ? '/ops' : '/catalogo';
+    return;
+  }
 
   if (route.guard === 'student' && store.auth.isWorker) { window.location.hash = '/ops'; return; }
   if (route.guard === 'worker' && !store.auth.isWorker) { window.location.hash = '/catalogo'; return; }
 
+  // La primera vez que se cargan los datos de la app (justo despues de
+  // iniciar sesion o al entrar directo a una URL) puede tardar varios
+  // segundos; sin esto la pantalla se quedaba completamente en blanco
+  // (ni siquiera la barra superior) mientras tanto.
+  if (!dataLoaded) {
+    root.innerHTML = loaderHtml('Cargando tu informacion...');
+  }
   await ensureData();
 
   root.innerHTML = `<div class="pmi-shell"><div id="pmi-topbar-slot"></div><main class="pmi-container pmi-main" id="pmi-main"></main></div>`;
   document.getElementById('pmi-topbar-slot').innerHTML = topbarHtml();
   attachTopbar(document.getElementById('pmi-topbar-slot'));
 
-  await refreshBanStatus();
-  if (store.auth.user?.Baneado === 1) {
-    renderBanned(document.getElementById('pmi-main'));
-    return;
-  }
+  // Loader liviano (dentro del contenedor, con la barra superior ya
+  // visible) mientras la vista en si vuelve a pedir sus propios datos.
+  document.getElementById('pmi-main').innerHTML = loaderHtml('Cargando...', false);
 
   window.scrollTo({ top: 0 });
   await route.render(document.getElementById('pmi-main'), { params, query });

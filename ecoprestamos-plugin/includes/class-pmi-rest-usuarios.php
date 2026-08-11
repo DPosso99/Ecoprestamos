@@ -118,6 +118,14 @@ class PMI_Rest_Usuarios
             return new WP_Error('pmi_bad_request', 'Correo y Nombre son obligatorios', array('status' => 400));
         }
 
+        // El auto-registro publico exige correo institucional @eafit.edu.co,
+        // igual que ya validaba el frontend (login.js). Un Trabajador creando
+        // una cuenta para otra persona (adminCreated=true) puede seguir
+        // usando cualquier correo, igual que antes.
+        if (!$admin_created && !preg_match('/^[^\s@]+@eafit\.edu\.co$/i', $correo)) {
+            return new WP_Error('pmi_bad_request', 'Debe ser un correo institucional (@eafit.edu.co)', array('status' => 400));
+        }
+
         // El auto-registro publico SIEMPRE crea un Estudiante sin banear,
         // sin importar lo que mande el body: Rol/Baneado/Trabajo solo se
         // confian del cliente cuando adminCreated=true, porque esa rama ya
@@ -156,7 +164,12 @@ class PMI_Rest_Usuarios
         );
 
         if ($inserted === false) {
-            return new WP_Error('pmi_server_error', 'Error al crear el usuario', array('status' => 500));
+            PMI_Error_Log::report(
+                self::is_missing_table_error($wpdb->last_error) ? 'pmi_missing_table' : 'pmi_db_insert_error',
+                'No se pudo crear el usuario en ' . PMI_DB::usuario() . ': ' . $wpdb->last_error,
+                array('endpoint' => 'POST /users', 'correo' => $correo, 'sql_error' => $wpdb->last_error)
+            );
+            return new WP_Error('pmi_server_error', 'No se pudo crear el usuario por un problema tecnico. Ya se avisamos al equipo de Medialab.', array('status' => 500));
         }
 
         if (!$admin_created) {
@@ -279,5 +292,15 @@ class PMI_Rest_Usuarios
     {
         PMI_Auth::clear_session_cookie();
         return rest_ensure_response(array('message' => 'Sesion cerrada'));
+    }
+
+    /**
+     * Detecta el caso especifico de "la tabla del plugin no existe" (subsitio
+     * nuevo donde el plugin nunca corrio su activacion), para que el correo
+     * de aviso apunte directo al panel de reparacion en vez de un SQL crudo.
+     */
+    public static function is_missing_table_error($sql_error)
+    {
+        return $sql_error && stripos($sql_error, "doesn't exist") !== false;
     }
 }

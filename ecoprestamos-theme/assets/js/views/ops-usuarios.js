@@ -118,9 +118,8 @@ export async function renderOpsUsuarios(root) {
         <label class="pmi-field" id="pmi-trabajo-field" style="display:${editing?.Rol === 'Trabajador' ? 'grid' : 'none'};">
           <span class="pmi-label">Tipo de trabajador</span>
           <select class="ui-input" name="Trabajo">
-            <option value="">Seleccionar...</option>
+            <option value="Trabajador" ${(editing?.Trabajo || 'Trabajador') === 'Trabajador' ? 'selected' : ''}>Trabajador</option>
             <option value="Practicante" ${editing?.Trabajo === 'Practicante' ? 'selected' : ''}>Practicante</option>
-            <option value="Trabajador" ${editing?.Trabajo === 'Trabajador' ? 'selected' : ''}>Trabajador</option>
           </select>
         </label>
         <div id="pmi-user-error"></div>

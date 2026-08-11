@@ -5,7 +5,7 @@
  * Version: 1.0.0
  * Author: EAFIT MediaLab
  * Author URI: https://www.eafit.edu.co/
- * Text Domain: ecoprestamos-plugin
+ * Text Domain: prestamos-inventario
  * Requires at least: 6.2
  * Requires PHP: 7.4
  */
@@ -40,6 +40,14 @@ PMI_Error_Log::register_fatal_handler();
 
 register_activation_hook(__FILE__, array('PMI_Activator', 'activate'));
 
+add_action('rest_api_init', function () {
+    PMI_Rest_Usuarios::register_routes();
+    PMI_Rest_Recursos::register_routes();
+    PMI_Rest_Prestamos::register_routes();
+    PMI_Rest_Detalles::register_routes();
+    PMI_Rest_Busqueda::register_routes();
+});
+
 new PMI_Admin();
 
 /**
@@ -56,14 +64,6 @@ add_action('wpmu_new_blog', function ($blog_id) {
     switch_to_blog($blog_id);
     PMI_Activator::activate();
     restore_current_blog();
-});
-
-add_action('rest_api_init', function () {
-    PMI_Rest_Usuarios::register_routes();
-    PMI_Rest_Recursos::register_routes();
-    PMI_Rest_Prestamos::register_routes();
-    PMI_Rest_Detalles::register_routes();
-    PMI_Rest_Busqueda::register_routes();
 });
 
 /**

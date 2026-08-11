@@ -24,6 +24,8 @@ add_action('wp_enqueue_scripts', function () {
     wp_localize_script('pmi-app', 'PMI_CONFIG', array(
         'restUrl' => esc_url_raw(rest_url('pmi/v1/')),
         'nonce' => wp_create_nonce('wp_rest'),
+        'pluginVersion' => defined('PMI_VERSION') ? PMI_VERSION : '',
+        'themeVersion' => $version,
     ));
 });
 

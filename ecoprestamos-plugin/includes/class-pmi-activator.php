@@ -52,10 +52,26 @@ class PMI_Activator
         return $sql;
     }
 
+    /**
+     * dbDelta() tiene un problema conocido de WordPress core: al comparar
+     * los indices ya existentes de una tabla (en particular los que MySQL
+     * crea automaticamente para soportar las FOREIGN KEY de
+     * 003-constraints.sql, que dbDelta no reconoce por no venir declarados
+     * en 001-tables.sql) su parseo de "SHOW INDEX FROM" genera warnings
+     * "Undefined array key" en PHP 8+. La tabla igual queda bien creada o
+     * actualizada -- son solo ruido -- pero si esta funcion se llama en
+     * medio de un request HTTP (ej. desde el boton "Verificar y reparar")
+     * ese output rompe la respuesta con "headers already sent" antes del
+     * redirect. Se silencian puntualmente esos warnings sin tocar el core.
+     */
     private static function create_tables()
     {
         $sql = self::read_sql_file('001-tables.sql');
+
+        $previous_level = error_reporting();
+        error_reporting($previous_level & ~E_WARNING);
         dbDelta($sql);
+        error_reporting($previous_level);
     }
 
     /**

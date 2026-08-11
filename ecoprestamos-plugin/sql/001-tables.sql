@@ -12,7 +12,7 @@
 
 CREATE TABLE %%PREFIX%%usuario (
   correo varchar(150) NOT NULL,
-  numero char(10) NOT NULL,
+  numero varchar(20) NOT NULL,
   contrasena varchar(100) NOT NULL,
   rol varchar(20) NOT NULL DEFAULT 'Estudiante',
   nombre varchar(100) NOT NULL,

@@ -33,3 +33,18 @@ export function qs(params) {
   const s = sp.toString();
   return s ? `?${s}` : '';
 }
+
+/**
+ * Preloader generico (spinner + mensaje) para mostrar mientras se espera
+ * una carga de datos, en vez de dejar la pantalla en blanco. `fullscreen`
+ * lo centra en toda la ventana (para cuando todavia no hay ni topbar);
+ * si es false, ocupa solo el contenedor donde se inserte.
+ */
+export function loaderHtml(message, fullscreen = true) {
+  return `
+    <div class="pmi-loader ${fullscreen ? 'pmi-loader-fullscreen' : ''}">
+      <div class="pmi-spinner"></div>
+      <div class="pmi-muted pmi-text-sm" style="margin-top:14px;">${escapeHtml(message)}</div>
+    </div>
+  `;
+}
