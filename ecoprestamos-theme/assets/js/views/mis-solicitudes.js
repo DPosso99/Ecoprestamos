@@ -1,20 +1,31 @@
 import { store } from '../state.js';
 import { escapeHtml, fmtDT, navigate } from '../dom.js';
 
+/**
+ * Renderiza el historial de solicitudes del estudiante (ruta
+ * `/mis-solicitudes`): lista filtrable/buscable de sus prestamos, con
+ * navegacion al detalle de cada uno.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @param {{ params: Object, query: Object }} ctx Parametros de ruta (sin uso aqui) y query (`q` y `filter` precargan busqueda/filtro).
+ * @returns {Promise<void>}
+ */
 export async function renderMisSolicitudes(root, { query }) {
   await store.loans.reload();
 
   let q = query.q || '';
   let filter = query.filter || 'all';
 
+  /** @returns {Array<Object>} Prestamos solicitados por el usuario actual. */
   function misPrestamos() {
     return store.loans.prestamos.filter((p) => p.usuario_solicitante === store.auth.user?.Correo);
   }
 
+  /** @returns {Array<Object>} Prestamos del usuario, ordenados del mas reciente al mas antiguo. */
   function ordered() {
     return [...misPrestamos()].sort((a, b) => new Date(b.Fecha_prestamo || 0) - new Date(a.Fecha_prestamo || 0));
   }
 
+  /** @returns {Array<Object>} Prestamos que pasan el filtro de estado (pendiente/entregado) y la busqueda actuales. */
   function filtered() {
     const query_ = q.trim().toLowerCase();
     return ordered().filter((p) => {
@@ -26,6 +37,10 @@ export async function renderMisSolicitudes(root, { query }) {
     });
   }
 
+  /**
+   * @param {Object} p Prestamo.
+   * @returns {string} HTML de una fila de la lista de solicitudes.
+   */
   function rowHtml(p) {
     const isPend = p.Entregado === 0;
     const details = store.loans.detailsMap[p.idPrestamo] || [];
@@ -43,6 +58,7 @@ export async function renderMisSolicitudes(root, { query }) {
     `;
   }
 
+  /** Renderiza la vista completa (contadores, buscador, lista) y engancha sus listeners. */
   function full() {
     const list = filtered();
     const all = misPrestamos();

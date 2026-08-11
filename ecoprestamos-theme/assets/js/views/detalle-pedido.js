@@ -1,6 +1,14 @@
 import { store } from '../state.js';
 import { escapeHtml, fmtDT, navigate } from '../dom.js';
 
+/**
+ * Renderiza el detalle de una solicitud de prestamo, vista del estudiante
+ * (ruta `/mis-solicitudes/:id`): estado, informacion general, recursos
+ * solicitados y notas.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @param {{ params: Object, query: Object }} ctx `params.id` es el idPrestamo a mostrar.
+ * @returns {Promise<void>}
+ */
 export async function renderDetallePedido(root, { params }) {
   await store.loans.reload();
   const prestamo = store.loans.getPrestamo(Number(params.id));

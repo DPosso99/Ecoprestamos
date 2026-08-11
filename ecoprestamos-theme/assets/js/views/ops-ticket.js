@@ -1,6 +1,14 @@
 import { store } from '../state.js';
 import { escapeHtml, fmtDT, navigate } from '../dom.js';
 
+/**
+ * Renderiza el detalle de un prestamo para el trabajador (ruta
+ * `/ops/ticket/:id`): informacion del prestamo, recursos solicitados, y la
+ * accion de marcarlo como entregado si aun esta pendiente.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @param {{ params: Object, query: Object }} ctx `params.id` es el idPrestamo a mostrar.
+ * @returns {Promise<void>}
+ */
 export async function renderOpsTicket(root, { params }) {
   await store.loans.reload();
   const prestamo = store.loans.getPrestamo(Number(params.id));
@@ -22,6 +30,10 @@ export async function renderOpsTicket(root, { params }) {
   const items = await store.loans.getLoanDetailItems(prestamo.idPrestamo);
   const totalUnidades = items.reduce((sum, it) => sum + (it.cantidad || 1), 0);
 
+  /**
+   * @param {Object} it Item de detalle del prestamo.
+   * @returns {string} HTML de una fila de recurso solicitado.
+   */
   function itemRowHtml(it) {
     return `
       <div class="pmi-flex pmi-justify-between pmi-items-center pmi-gap-3" style="padding:10px 0;border-top:1px solid var(--eafit-border);">
@@ -34,6 +46,7 @@ export async function renderOpsTicket(root, { params }) {
     `;
   }
 
+  /** Renderiza la vista completa (informacion, recursos, acciones) y engancha sus listeners. */
   function full() {
     root.innerHTML = `
       <div class="pmi-flex pmi-justify-between pmi-items-start pmi-gap-4" style="flex-wrap:wrap;">

@@ -10,6 +10,12 @@ if (!defined('ABSPATH')) {
  */
 class PMI_Rest_Busqueda
 {
+    /**
+     * Registra las rutas de busqueda de recursos y de reportes administrativos
+     * bajo /wp-json/pmi/v1/.
+     *
+     * @return void
+     */
     public static function register_routes()
     {
         register_rest_route('pmi/v1', '/resources/search/tipo/(?P<tipo>[^/]+)', array(
@@ -43,6 +49,13 @@ class PMI_Rest_Busqueda
         ));
     }
 
+    /**
+     * GET /resources/search/tipo/{tipo}: busca recursos por tipo exacto.
+     * Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "tipo".
+     * @return WP_REST_Response|WP_Error Lista de recursos, o 404 si no hay coincidencias.
+     */
     public static function by_tipo(WP_REST_Request $request)
     {
         global $wpdb;
@@ -53,6 +66,13 @@ class PMI_Rest_Busqueda
         return rest_ensure_response($rows);
     }
 
+    /**
+     * GET /resources/search/nombre/{nombre}: busca recursos por nombre exacto.
+     * Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "nombre".
+     * @return WP_REST_Response|WP_Error Lista de recursos, o 404 si no hay coincidencias.
+     */
     public static function by_nombre(WP_REST_Request $request)
     {
         global $wpdb;
@@ -63,6 +83,13 @@ class PMI_Rest_Busqueda
         return rest_ensure_response($rows);
     }
 
+    /**
+     * GET /resources/search/salon/{ubicacion}: busca recursos por ubicacion exacta.
+     * Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "ubicacion".
+     * @return WP_REST_Response|WP_Error Lista de recursos, o 404 si no hay coincidencias.
+     */
     public static function by_salon(WP_REST_Request $request)
     {
         global $wpdb;
@@ -73,6 +100,12 @@ class PMI_Rest_Busqueda
         return rest_ensure_response($rows);
     }
 
+    /**
+     * GET /admin/baneados: lista los usuarios marcados como baneados.
+     * Requiere rol Trabajador.
+     *
+     * @return WP_REST_Response|WP_Error Lista de usuarios baneados, o 404 si no hay ninguno.
+     */
     public static function usuarios_baneados()
     {
         global $wpdb;
@@ -83,6 +116,14 @@ class PMI_Rest_Busqueda
         return rest_ensure_response($rows);
     }
 
+    /**
+     * GET /admin/prestamos-por-fecha/{fecha}: lista los prestamos cuya
+     * fecha_prestamo cae en la fecha indicada (formato YYYY-MM-DD).
+     * Requiere rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "fecha".
+     * @return WP_REST_Response|WP_Error Lista de prestamos, o 404 si no hubo ninguno esa fecha.
+     */
     public static function prestamos_por_fecha(WP_REST_Request $request)
     {
         global $wpdb;

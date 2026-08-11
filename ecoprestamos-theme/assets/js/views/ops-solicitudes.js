@@ -1,24 +1,36 @@
 import { store } from '../state.js';
 import { escapeHtml, fmtDT, navigate } from '../dom.js';
 
+/**
+ * Renderiza la bandeja de solicitudes del trabajador (ruta
+ * `/ops/solicitudes`): tabla de prestamos con tabs pendiente/entregado,
+ * busqueda, y navegacion al ticket de cada prestamo.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @param {{ params: Object, query: Object }} ctx Parametros de ruta (sin uso aqui) y query (`tab` y `q` precargan pestana/busqueda).
+ * @returns {Promise<void>}
+ */
 export async function renderOpsSolicitudes(root, { query }) {
   await store.loans.reload();
 
   let tab = query.tab === 'entregado' ? 'entregado' : 'pendiente';
   let q = query.q || '';
 
+  /** @returns {'pendiente'|'entregado'} La pestana a la que pertenece un prestamo segun su estado. */
   function prestamoTab(p) { return p.Entregado === 0 ? 'pendiente' : 'entregado'; }
 
+  /** @returns {Array<Object>} Todos los prestamos, ordenados del mas reciente al mas antiguo. */
   function sorted() {
     return [...store.loans.prestamos].sort((a, b) => new Date(b.Fecha_prestamo || 0) - new Date(a.Fecha_prestamo || 0));
   }
 
+  /** @returns {{ pendiente: number, entregado: number }} Conteo de prestamos por pestana. */
   function counts() {
     const c = { pendiente: 0, entregado: 0 };
     sorted().forEach((p) => { c[prestamoTab(p)]++; });
     return c;
   }
 
+  /** @returns {Array<Object>} Prestamos de la pestana activa que coinciden con la busqueda actual. */
   function filtered() {
     const query_ = q.trim().toLowerCase();
     return sorted().filter((p) => {
@@ -30,6 +42,7 @@ export async function renderOpsSolicitudes(root, { query }) {
     });
   }
 
+  /** Renderiza la vista completa (tabs, buscador, tabla) y engancha sus listeners. */
   function full() {
     const list = filtered();
     const c = counts();

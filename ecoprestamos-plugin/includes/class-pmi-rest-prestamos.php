@@ -8,6 +8,11 @@ if (!defined('ABSPATH')) {
  */
 class PMI_Rest_Prestamos
 {
+    /**
+     * Registra las rutas CRUD de prestamos bajo /wp-json/pmi/v1/.
+     *
+     * @return void
+     */
     public static function register_routes()
     {
         register_rest_route('pmi/v1', '/loans', array(
@@ -42,6 +47,11 @@ class PMI_Rest_Prestamos
         ));
     }
 
+    /**
+     * GET /loans: lista todos los prestamos. Requiere sesion iniciada.
+     *
+     * @return WP_REST_Response Lista de prestamos.
+     */
     public static function get_loans()
     {
         global $wpdb;
@@ -49,6 +59,12 @@ class PMI_Rest_Prestamos
         return rest_ensure_response(self::map_rows($rows));
     }
 
+    /**
+     * GET /loans/{id}: obtiene un prestamo por su id. Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id".
+     * @return WP_REST_Response|WP_Error El prestamo, o 404 si no existe.
+     */
     public static function get_loan(WP_REST_Request $request)
     {
         global $wpdb;
@@ -62,6 +78,14 @@ class PMI_Rest_Prestamos
         return rest_ensure_response(self::map_row($row));
     }
 
+    /**
+     * POST /loans: crea un prestamo nuevo. Requiere sesion iniciada.
+     * usuario_solicitante y usuario_responsable son obligatorios y deben
+     * existir en la tabla de usuarios.
+     *
+     * @param WP_REST_Request $request Request con un body JSON (usuario_solicitante, usuario_responsable, Notas, Fecha_prestamo, Hora_entrega, Entregado).
+     * @return WP_REST_Response|WP_Error Confirmacion con el idPrestamo creado, o 400 si faltan datos o los usuarios no existen.
+     */
     public static function create_loan(WP_REST_Request $request)
     {
         global $wpdb;
@@ -100,6 +124,15 @@ class PMI_Rest_Prestamos
         return rest_ensure_response(array('message' => 'Prestamo solicitado', 'idPrestamo' => (int) $wpdb->insert_id));
     }
 
+    /**
+     * PUT /loans/{id}: actualiza un prestamo existente (actualizacion
+     * parcial: solo se cambian los campos presentes en el body). Requiere
+     * sesion iniciada. Si se marca Entregado sin enviar Hora_entrega, se usa
+     * la hora actual del sitio.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id" y un body JSON con los campos a actualizar.
+     * @return WP_REST_Response|WP_Error Confirmacion, o 404 si el prestamo no existe.
+     */
     public static function edit_loan(WP_REST_Request $request)
     {
         global $wpdb;
@@ -141,6 +174,13 @@ class PMI_Rest_Prestamos
         return rest_ensure_response(array('message' => 'Prestamo actualizado'));
     }
 
+    /**
+     * DELETE /loans/{id}: elimina un prestamo y sus detalles asociados.
+     * Requiere rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id".
+     * @return WP_REST_Response|WP_Error Confirmacion, o 404/409 si no existe o no se puede eliminar.
+     */
     public static function delete_loan(WP_REST_Request $request)
     {
         global $wpdb;
@@ -167,6 +207,9 @@ class PMI_Rest_Prestamos
     /**
      * Traduce nombres de columna snake_case de la BD a los nombres
      * PascalCase/tal-cual que espera el frontend original (ver src/types/index.ts).
+     *
+     * @param array $row Fila cruda de la tabla prestamo.
+     * @return array Fila con las claves esperadas por el frontend.
      */
     private static function map_row($row)
     {
@@ -181,6 +224,12 @@ class PMI_Rest_Prestamos
         );
     }
 
+    /**
+     * Aplica map_row() a una lista de filas de prestamo.
+     *
+     * @param array $rows Filas crudas de la tabla prestamo.
+     * @return array Filas con las claves esperadas por el frontend.
+     */
     private static function map_rows($rows)
     {
         return array_map(array(__CLASS__, 'map_row'), $rows);

@@ -1,22 +1,34 @@
 import { store } from '../state.js';
 import { escapeHtml, fmtDT, navigate } from '../dom.js';
 
+/**
+ * Renderiza "Mis prestamos" (ruta `/mis-prestamos`, vista de estudiante):
+ * historial de prestamos ya entregados, en filas expandibles con su detalle.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @returns {Promise<void>}
+ */
 export async function renderMisPrestamos(root) {
   await store.loans.reload();
 
   let q = '';
   const openIds = {};
 
+  /** @returns {Array<Object>} Todos los prestamos ya entregados (de cualquier estudiante). */
   function delivered() {
     return store.loans.prestamos.filter((p) => p.Entregado === 1);
   }
 
+  /** @returns {Array<Object>} Prestamos entregados que coinciden con la busqueda actual. */
   function filtered() {
     const query = q.trim().toLowerCase();
     if (!query) return delivered();
     return delivered().filter((p) => [String(p.idPrestamo), p.usuario_solicitante, p.usuario_responsable, p.Notas ?? ''].join(' ').toLowerCase().includes(query));
   }
 
+  /**
+   * @param {Object} p Prestamo entregado.
+   * @returns {string} HTML de la fila expandible de un prestamo.
+   */
   function rowHtml(p) {
     const isOpen = openIds[p.idPrestamo] ?? true;
     const details = store.loans.detailsMap[p.idPrestamo] || [];
@@ -54,6 +66,7 @@ export async function renderMisPrestamos(root) {
     `;
   }
 
+  /** Renderiza la vista completa (buscador + lista expandible) y engancha sus listeners. */
   function full() {
     const list = filtered();
     const total = delivered().length;

@@ -10,6 +10,12 @@ class PMI_Rest_Usuarios
 {
     const DEFAULT_TEMP_PASSWORD = 'Medialab2026!';
 
+    /**
+     * Registra las rutas CRUD de usuarios y las rutas de login/logout bajo
+     * /wp-json/pmi/v1/.
+     *
+     * @return void
+     */
     public static function register_routes()
     {
         register_rest_route('pmi/v1', '/users', array(
@@ -60,6 +66,9 @@ class PMI_Rest_Usuarios
      * El auto-registro de un Estudiante es publico; que un Trabajador cree
      * una cuenta para otra persona (adminCreated=true) exige sesion + nonce
      * + rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request POST /users.
+     * @return true|WP_Error True si esta autorizada, o WP_Error 401/403 en caso contrario.
      */
     public static function permission_create_user(WP_REST_Request $request)
     {
@@ -73,12 +82,20 @@ class PMI_Rest_Usuarios
     /**
      * Cualquier usuario logueado puede editar su propio perfil; cambiar el
      * perfil de otra persona exige rol Trabajador (se valida en el handler).
+     *
+     * @param WP_REST_Request $request Request PUT /users/{correo}.
+     * @return true|WP_Error True si hay sesion valida, o WP_Error 401/403 en caso contrario.
      */
     public static function permission_edit_user(WP_REST_Request $request)
     {
         return PMI_Auth::permission_logged_in($request);
     }
 
+    /**
+     * GET /users: lista todos los usuarios (sin contrasena). Requiere rol Trabajador.
+     *
+     * @return WP_REST_Response Lista de usuarios.
+     */
     public static function get_users()
     {
         global $wpdb;
@@ -86,6 +103,13 @@ class PMI_Rest_Usuarios
         return rest_ensure_response($rows);
     }
 
+    /**
+     * GET /users/{correo}: obtiene un usuario por su correo (sin
+     * contrasena). Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "correo".
+     * @return WP_REST_Response|WP_Error El usuario, o 404 si no existe.
+     */
     public static function get_user(WP_REST_Request $request)
     {
         global $wpdb;
@@ -103,6 +127,16 @@ class PMI_Rest_Usuarios
         return rest_ensure_response($row);
     }
 
+    /**
+     * POST /users: crea un usuario nuevo. Publico para auto-registro de
+     * Estudiante (exige correo @eafit.edu.co); con adminCreated=true crea la
+     * cuenta con el Rol/Baneado/Trabajo indicados y exige rol Trabajador
+     * (ver permission_create_user()). En el auto-registro publico se emite
+     * ademas la cookie de sesion.
+     *
+     * @param WP_REST_Request $request Request con un body JSON (Correo, numero, Contraseña/Contrasena, Nombre, adminCreated, y si adminCreated: Rol, Baneado, Trabajo).
+     * @return WP_REST_Response|WP_Error El usuario creado (sin contrasena), o 400/409/500 en caso de error.
+     */
     public static function create_user(WP_REST_Request $request)
     {
         global $wpdb;
@@ -184,6 +218,15 @@ class PMI_Rest_Usuarios
         return rest_ensure_response($row);
     }
 
+    /**
+     * PUT /users/{correo}: actualiza un usuario existente (actualizacion
+     * parcial). Requiere sesion iniciada; solo el propio usuario o un
+     * Trabajador pueden editar, y solo un Trabajador puede cambiar
+     * Rol/Baneado/Trabajo.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "correo" y un body JSON con los campos a actualizar.
+     * @return WP_REST_Response|WP_Error El usuario actualizado (sin contrasena), o 403/404 en caso de error.
+     */
     public static function edit_user(WP_REST_Request $request)
     {
         global $wpdb;
@@ -245,6 +288,12 @@ class PMI_Rest_Usuarios
         return rest_ensure_response($row);
     }
 
+    /**
+     * DELETE /users/{correo}: elimina un usuario. Requiere rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "correo".
+     * @return WP_REST_Response|WP_Error Confirmacion, o 404/409 si no existe o tiene prestamos asociados.
+     */
     public static function delete_user(WP_REST_Request $request)
     {
         global $wpdb;
@@ -265,6 +314,13 @@ class PMI_Rest_Usuarios
         return rest_ensure_response(array('message' => 'Usuario eliminado'));
     }
 
+    /**
+     * POST /login: verifica correo/contrasena y, si son validos, emite la
+     * cookie de sesion propia. Ruta publica.
+     *
+     * @param WP_REST_Request $request Request con un body JSON (Correo, Contraseña/Contrasena).
+     * @return WP_REST_Response|WP_Error Datos basicos del usuario autenticado, o 401 si las credenciales son invalidas.
+     */
     public static function login(WP_REST_Request $request)
     {
         global $wpdb;
@@ -288,6 +344,11 @@ class PMI_Rest_Usuarios
         ));
     }
 
+    /**
+     * POST /logout: borra la cookie de sesion propia. Ruta publica.
+     *
+     * @return WP_REST_Response Confirmacion de cierre de sesion.
+     */
     public static function logout()
     {
         PMI_Auth::clear_session_cookie();
@@ -298,6 +359,9 @@ class PMI_Rest_Usuarios
      * Detecta el caso especifico de "la tabla del plugin no existe" (subsitio
      * nuevo donde el plugin nunca corrio su activacion), para que el correo
      * de aviso apunte directo al panel de reparacion en vez de un SQL crudo.
+     *
+     * @param string $sql_error Mensaje de error de $wpdb->last_error.
+     * @return bool True si el mensaje corresponde a una tabla inexistente.
      */
     public static function is_missing_table_error($sql_error)
     {

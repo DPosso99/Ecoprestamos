@@ -23,6 +23,12 @@ class PMI_Auth
     private static $current_user = null;
     private static $current_user_loaded = false;
 
+    /**
+     * Secreto usado para firmar la cookie de sesion propia (opcion
+     * pmi_auth_secret generada en la activacion, con fallback al salt de WP).
+     *
+     * @return string Secreto HMAC.
+     */
     private static function secret()
     {
         $secret = get_option('pmi_auth_secret');
@@ -33,6 +39,12 @@ class PMI_Auth
         return $secret;
     }
 
+    /**
+     * Firma un payload con HMAC-SHA256 usando el secreto del plugin.
+     *
+     * @param string $payload Cadena a firmar (payload en base64 de la cookie de sesion).
+     * @return string Firma HMAC-SHA256 en hexadecimal.
+     */
     private static function sign($payload)
     {
         return hash_hmac('sha256', $payload, self::secret());
@@ -40,6 +52,9 @@ class PMI_Auth
 
     /**
      * Crea el valor de cookie de sesion para un usuario ya autenticado.
+     *
+     * @param string $correo Correo del usuario autenticado.
+     * @return void
      */
     public static function issue_session_cookie($correo)
     {
@@ -65,6 +80,11 @@ class PMI_Auth
         );
     }
 
+    /**
+     * Borra la cookie de sesion propia (usada en logout).
+     *
+     * @return void
+     */
     public static function clear_session_cookie()
     {
         setcookie(
@@ -83,6 +103,8 @@ class PMI_Auth
 
     /**
      * Verifica la cookie de la request actual y devuelve el correo si es valida.
+     *
+     * @return string|null Correo del usuario si la cookie es valida y no expiro, o null en caso contrario.
      */
     private static function correo_from_cookie()
     {
@@ -117,6 +139,8 @@ class PMI_Auth
     /**
      * Usuario autenticado de la request actual (fila completa sin contrasena),
      * o null si no hay sesion valida. Se cachea por request.
+     *
+     * @return array|null Fila de pmi_usuario (correo, numero, rol, nombre, baneado, trabajo), o null si no hay sesion.
      */
     public static function current_user()
     {
@@ -142,11 +166,21 @@ class PMI_Auth
         return self::$current_user = $row ?: null;
     }
 
+    /**
+     * Indica si la request actual tiene una sesion valida.
+     *
+     * @return bool
+     */
     public static function is_logged_in()
     {
         return self::current_user() !== null;
     }
 
+    /**
+     * Indica si el usuario autenticado de la request actual tiene rol Trabajador.
+     *
+     * @return bool
+     */
     public static function is_worker()
     {
         $user = self::current_user();
@@ -156,6 +190,9 @@ class PMI_Auth
     /**
      * Proteccion CSRF para verbos de escritura: exige un nonce REST valido
      * ademas de la cookie de sesion propia.
+     *
+     * @param WP_REST_Request $request Request actual.
+     * @return bool True si el header X-WP-Nonce trae un nonce REST valido.
      */
     public static function verify_nonce(WP_REST_Request $request)
     {
@@ -166,6 +203,9 @@ class PMI_Auth
     /**
      * permission_callback generico: requiere sesion valida y, si el verbo
      * es de escritura, tambien nonce valido.
+     *
+     * @param WP_REST_Request $request Request actual.
+     * @return true|WP_Error True si la request esta autorizada, o WP_Error 401/403 en caso contrario.
      */
     public static function permission_logged_in(WP_REST_Request $request)
     {
@@ -180,6 +220,9 @@ class PMI_Auth
 
     /**
      * permission_callback para operaciones administrativas (solo Trabajador).
+     *
+     * @param WP_REST_Request $request Request actual.
+     * @return true|WP_Error True si esta autorizada, o WP_Error 401/403 en caso contrario.
      */
     public static function permission_worker(WP_REST_Request $request)
     {
@@ -195,6 +238,8 @@ class PMI_Auth
 
     /**
      * Endpoint publico (catalogo de solo lectura, login). Sin requisito de sesion.
+     *
+     * @return true Siempre autorizado.
      */
     public static function permission_public()
     {

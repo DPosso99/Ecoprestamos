@@ -23,6 +23,10 @@ class PMI_Admin
      */
     private $menu_icon = 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iQ2FwYV8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEuMSIgdmlld0JveD0iMCAwIDMyIDMyIj4KICA8IS0tIEdlbmVyYXRvcjogQWRvYmUgSWxsdXN0cmF0b3IgMzAuMC4wLCBTVkcgRXhwb3J0IFBsdWctSW4gLiBTVkcgVmVyc2lvbjogMi4xLjEgQnVpbGQgMTIzKSAgLS0+CiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5zdDAgewogICAgICAgIGZpbGw6ICNmZmY7CiAgICAgIH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgogIDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik0xNiwyLjI5Yy03LjU3LDAtMTMuNzEsNi4xNC0xMy43MSwxMy43MSwwLC4xNiwwLC4zMy4wMS40OS4yNyw1LjE0LDQuNjcsOS4xLDEwLjY3LDguODUsMS42Mi0uMDcsMy4wOS0uODQsNC4zMS0xLjkyLjM2LS4zMi44My0uNTIsMS4zNS0uNTIsMS4yOCwwLDIuMjksMS4xOSwxLjk4LDIuNTItLjE3Ljc1LS43OCwxLjM2LTEuNTMsMS41Mi0uMjYuMDYtLjUzLjA2LS43Ny4wMi0xLjA5LS4xNi0yLjE4LS4yNi0zLjI4LS4xNy00Ljg0LjQzLTkuMDEtMS40Ni0xMS42Mi01LjM0LDIuMTEsNC44Niw2Ljk1LDguMjUsMTIuNTgsOC4yNSw3LjU3LDAsMTMuNzEtNi4xNCwxMy43MS0xMy43MVMyMy41OCwyLjI5LDE2LDIuMjlaTTIyLjcyLDEwLjg1aC03Ljc2djFjLS4wMS4yNS0uMDIuNS0uMDQuNzV2LjE5Yy0uMDIuMTUtLjAzLjMtLjA0LjQ0aC4yOGMyLjExLS4wNiw0LjIxLS4wOSw2LjMyLS4wOC0uMDMuNDYtLjA2LjkxLS4wOSwxLjM3LS4wMS4xNi0uMDIuMzEtLjAzLjQ3LS4wMi4yMi0uMDMuNDUtLjA1LjY3di4yMXMtLjAzLjItLjAzLjJ2LjE3cS0uMDMuMTQtLjExLjI5bC02LjYuMDh2MWMwLC4yMS0uMDIuNDEtLjAzLjYybC0uMDIuMjljLS4wMi4xOS0uMDUuMzctLjEuNTVoLjIyYy43LS4wMiwxLjQtLjA0LDIuMDktLjA2LjM2LDAsLjcyLS4wMiwxLjA4LS4wM3EzLjA1LS4wOCw0LjQ0LS4wN2MwLC42My0uMDIsMS4yNS0uMDYsMS44OC0uMDEuMTYtLjAyLjMxLS4wMy40N2wtLjAyLjMtLjAyLjI3cS0uMDIuMjItLjEuNDVoLTEyLjljLjA1LS44NS4wOS0xLjcuMTgtMi41NS40MS00LjAzLjQ2LTguMDguNTktMTIuMTJoMTIuOThsLS4xNSwzLjIzWiIvPgo8L3N2Zz4=';
 
+    /**
+     * Engancha el menu de administracion y los handlers de admin-post.php
+     * (reparar, correo de prueba, cambiar rol) a sus hooks de WordPress.
+     */
     public function __construct()
     {
         add_action('admin_menu', array($this, 'register_menu'));
@@ -34,6 +38,8 @@ class PMI_Admin
     /**
      * Se registra como menu de nivel superior en la posicion 3.1: justo
      * debajo de "EAFIT Lab" (posicion 3 en eafit-lab-core.php).
+     *
+     * @return void
      */
     public function register_menu()
     {
@@ -63,12 +69,22 @@ class PMI_Admin
      * de vuelta a la URL actual (admin-post.php) en vez de la pagina real,
      * dejando al usuario varado ahi despues de guardar. admin_url() no
      * depende de ese registro y funciona en cualquier contexto.
+     *
+     * @param string $slug Slug de la pagina de administracion (ver MENU_SLUG/USERS_SLUG).
+     * @param array  $args Argumentos de query string adicionales para la URL.
+     * @return string URL absoluta de la pagina de administracion.
      */
     private function page_url($slug, array $args = array())
     {
         return add_query_arg($args, admin_url('admin.php?page=' . $slug));
     }
 
+    /**
+     * Mapa de etiqueta legible => nombre de tabla para las tablas propias
+     * del plugin, usado por el panel de estado para verificar que existan.
+     *
+     * @return array Mapa etiqueta => nombre de tabla.
+     */
     private function expected_tables()
     {
         return array(
@@ -79,12 +95,25 @@ class PMI_Admin
         );
     }
 
+    /**
+     * Verifica si una tabla existe en la base de datos actual.
+     *
+     * @param string $table Nombre completo de la tabla.
+     * @return bool True si la tabla existe.
+     */
     private function table_exists($table)
     {
         global $wpdb;
         return (bool) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
     }
 
+    /**
+     * Callback de la pagina de menu "Medialab Prestamos > Estado": muestra
+     * el estado del plugin, del tema y de las tablas de base de datos, y el
+     * historial de errores recientes. Requiere capacidad manage_options.
+     *
+     * @return void
+     */
     public function render()
     {
         if (!current_user_can('manage_options')) {
@@ -228,6 +257,13 @@ class PMI_Admin
         <?php
     }
 
+    /**
+     * Callback de admin-post.php para la accion "pmi_test_email" (boton
+     * "Enviar correo de prueba" del panel de estado). Requiere capacidad
+     * manage_options y nonce valido.
+     *
+     * @return void
+     */
     public function handle_test_email()
     {
         if (!current_user_can('manage_options') || !check_admin_referer('pmi_test_email')) {
@@ -240,6 +276,15 @@ class PMI_Admin
         exit;
     }
 
+    /**
+     * Callback de admin-post.php para la accion "pmi_repair" (boton
+     * "Verificar y reparar" del panel de estado): vuelve a correr la
+     * activacion del plugin y corrige la configuracion template/stylesheet
+     * si el tema activo es "ecoprestamos-theme" y esta desalineada.
+     * Requiere capacidad manage_options y nonce valido.
+     *
+     * @return void
+     */
     public function handle_repair()
     {
         if (!current_user_can('manage_options') || !check_admin_referer('pmi_repair')) {
@@ -266,6 +311,11 @@ class PMI_Admin
      * de WordPress -- que no necesariamente tiene una cuenta Trabajador
      * dentro de la app -- pueda promover al primer Trabajador o corregir el
      * rol de alguien sin pasar por la app.
+     *
+     * Callback de la pagina de menu "Medialab Prestamos > Usuarios".
+     * Requiere capacidad manage_options.
+     *
+     * @return void
      */
     public function render_users()
     {
@@ -391,6 +441,13 @@ class PMI_Admin
         <?php
     }
 
+    /**
+     * Callback de admin-post.php para la accion "pmi_set_role" (formulario
+     * de rol en la pantalla "Usuarios"): actualiza el Rol y Trabajo de un
+     * usuario. Requiere capacidad manage_options y nonce valido por correo.
+     *
+     * @return void
+     */
     public function handle_set_role()
     {
         if (!current_user_can('manage_options')) {

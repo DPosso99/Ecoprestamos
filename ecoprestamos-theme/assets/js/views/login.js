@@ -1,6 +1,7 @@
 import { store } from '../state.js';
 import { escapeHtml, navigate } from '../dom.js';
 
+/** @returns {boolean} true si `email` tiene dominio institucional @eafit.edu.co. */
 const isEafitEmail = (email) => /^[^\s@]+@eafit\.edu\.co$/i.test(email.trim());
 
 // Paises soportados para el celular: EAFIT recibe tanto estudiantes locales
@@ -21,6 +22,10 @@ const COUNTRIES = [
   { code: 'ES', dial: '+34', name: 'España', digits: 9 },
 ];
 const DEFAULT_COUNTRY_CODE = 'CO';
+/**
+ * @param {string} code Codigo de pais (ej. 'CO').
+ * @returns {Object} La entrada de `COUNTRIES` correspondiente, o Colombia por defecto si no se encuentra.
+ */
 const findCountry = (code) => COUNTRIES.find((c) => c.code === code) || COUNTRIES[0];
 
 const REGISTER_FIELDS = ['Correo', 'Nombre', 'numero', 'Contrasena'];
@@ -38,6 +43,10 @@ const SUCCESS_MESSAGE_INTERVAL_MS = 900;
 /**
  * Reglas de validacion por campo, compartidas entre la validacion en vivo
  * (mientras el usuario escribe) y la validacion final al enviar el form.
+ * @param {string} name Nombre del campo ('Correo', 'Nombre', 'numero', 'Contrasena').
+ * @param {string} value Valor actual del campo.
+ * @param {Object} [country] Pais seleccionado (para validar cantidad de digitos del celular).
+ * @returns {string} Mensaje de error, o '' si el valor es valido.
  */
 function fieldError(name, value, country) {
   switch (name) {
@@ -65,6 +74,12 @@ function fieldError(name, value, country) {
   }
 }
 
+/**
+ * Valida los campos del formulario de registro usando `fieldError`.
+ * @param {FormData} fd Datos del formulario de registro.
+ * @param {string} countryCode Codigo de pais seleccionado (para el celular).
+ * @returns {Object} Mapa de errores por nombre de campo (vacio si todo es valido).
+ */
 function validateRegister(fd, countryCode) {
   const country = findCountry(countryCode);
   const errors = {};
@@ -76,10 +91,19 @@ function validateRegister(fd, countryCode) {
   return errors;
 }
 
+/**
+ * Renderiza la pantalla de login/registro (ruta `/login`, publica).
+ * Maneja internamente el estado de la pestana activa (login o registro),
+ * la validacion en vivo del formulario de registro, y las llamadas de
+ * autenticacion contra el store.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @returns {Promise<void>}
+ */
 export async function renderLogin(root) {
   let tab = 'login';
   let selectedCountryCode = DEFAULT_COUNTRY_CODE;
 
+  /** @returns {string} HTML del shell de la pantalla (logo, tabs, slot del formulario). */
   function html() {
     const pluginVersion = window.PMI_CONFIG?.pluginVersion;
     const themeVersion = window.PMI_CONFIG?.themeVersion;
@@ -117,6 +141,11 @@ export async function renderLogin(root) {
     `;
   }
 
+  /**
+   * @param {string|null} error Error general a mostrar (ej. credenciales invalidas).
+   * @param {boolean} loading Si el submit esta en curso (deshabilita el boton).
+   * @returns {string} HTML del formulario de login.
+   */
   function loginFormHtml(error, loading) {
     return `
       <form id="pmi-login-form" class="pmi-flex-col pmi-gap-4">
@@ -139,6 +168,7 @@ export async function renderLogin(root) {
    * @param {string} error   Error general del server (correo duplicado, etc.).
    * @param {boolean} loading
    * @param {Object} values  Valores a repoblar (para no perder lo escrito si el form se re-renderiza).
+   * @returns {string} HTML del formulario de registro.
    */
   function registerFormHtml(errors, error, loading, values) {
     const v = values || {};
@@ -179,6 +209,7 @@ export async function renderLogin(root) {
     `;
   }
 
+  /** @returns {string} HTML de la pantalla de "creando cuenta" con spinner y mensaje rotativo. */
   function renderSuccessLoaderHtml() {
     return `
       <div class="pmi-auth-shell">
@@ -192,7 +223,10 @@ export async function renderLogin(root) {
     `;
   }
 
-  /** Muestra el loader de exito rotando mensajes; resuelve cuando termina el ciclo. */
+  /**
+   * Muestra el loader de exito rotando mensajes; resuelve cuando termina el ciclo.
+   * @returns {Promise<void>}
+   */
   function showSuccessLoader() {
     root.innerHTML = renderSuccessLoaderHtml();
     const msgEl = root.querySelector('#pmi-success-msg');
@@ -216,12 +250,14 @@ export async function renderLogin(root) {
    * submit), limita el celular a solo digitos segun el pais elegido, y
    * habilita "Crear cuenta" solo cuando los 4 campos tienen algo escrito
    * (la validez completa se re-chequea igual al enviar).
+   * @param {HTMLFormElement} form Formulario de registro ya insertado en el DOM.
    */
   function attachRegisterLiveValidation(form) {
     const submitBtn = form.querySelector('button[type="submit"]');
     const countrySelect = form.querySelector('[name="paisCelular"]');
     const numeroInput = form.querySelector('[name="numero"]');
 
+    /** Muestra u oculta el mensaje/estilo de error de un campo puntual. */
     function showFieldError(name, message) {
       const input = form.querySelector(`[name="${name}"]`);
       const errorEl = form.querySelector(`#err-${name}`);
@@ -229,6 +265,11 @@ export async function renderLogin(root) {
       if (errorEl) errorEl.textContent = message || '';
     }
 
+    /**
+     * Valida un solo campo y refleja el resultado en la UI.
+     * @param {string} name Nombre del campo.
+     * @returns {boolean} true si el campo es valido.
+     */
     function validateOne(name) {
       const input = form.querySelector(`[name="${name}"]`);
       const value = (input?.value || '').trim();
@@ -237,6 +278,7 @@ export async function renderLogin(root) {
       return !message;
     }
 
+    /** Habilita/deshabilita el boton de submit segun si todos los campos requeridos tienen valor. */
     function updateSubmitState() {
       const allFilled = REGISTER_FIELDS.every((name) => {
         const input = form.querySelector(`[name="${name}"]`);
@@ -282,6 +324,7 @@ export async function renderLogin(root) {
     updateSubmitState();
   }
 
+  /** Monta el formulario correspondiente a la pestana activa y engancha sus listeners. */
   function mountForm() {
     const slot = root.querySelector('#pmi-auth-form');
     if (tab === 'login') {
@@ -295,6 +338,13 @@ export async function renderLogin(root) {
     }
   }
 
+  /**
+   * Handler de submit del formulario de login: intenta autenticar contra
+   * el store y navega a "/" (que redirige segun rol); en error, re-renderiza
+   * el formulario con el mensaje de error.
+   * @param {SubmitEvent} e
+   * @returns {Promise<void>}
+   */
   async function onLoginSubmit(e) {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -309,6 +359,13 @@ export async function renderLogin(root) {
     }
   }
 
+  /**
+   * Handler de submit del formulario de registro: valida todos los campos,
+   * si hay errores los muestra sin llamar al backend; si son validos, crea
+   * la cuenta, muestra el loader de exito y navega a "/".
+   * @param {SubmitEvent} e
+   * @returns {Promise<void>}
+   */
   async function onRegisterSubmit(e) {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -351,6 +408,7 @@ export async function renderLogin(root) {
     }
   }
 
+  /** Renderiza el shell completo y monta el formulario activo; engancha el cambio de pestanas. */
   function full() {
     root.innerHTML = html();
     mountForm();

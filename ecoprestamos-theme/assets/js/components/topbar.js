@@ -1,6 +1,11 @@
 import { store } from '../state.js';
 import { escapeHtml, navigate } from '../dom.js';
 
+/**
+ * Genera el HTML de la barra superior (logo, buscador, navegacion y menu
+ * de usuario), adaptada segun si hay sesion y si el usuario es Trabajador.
+ * @returns {string} HTML de la topbar.
+ */
 export function topbarHtml() {
   const { user, isWorker } = store.auth;
   const letter = ((user?.Nombre || '').trim()[0] || (user?.Correo || 'U')[0] || 'U').toUpperCase();
@@ -65,6 +70,12 @@ export function topbarHtml() {
   `;
 }
 
+/**
+ * Engancha los listeners de la topbar ya insertada en el DOM: resalta el
+ * link activo, abre/cierra el menu de usuario, navega desde los botones
+ * `data-go`, maneja logout y el boton de busqueda.
+ * @param {HTMLElement} root Contenedor donde se inserto `topbarHtml()`.
+ */
 export function attachTopbar(root) {
   const path = window.location.hash.replace(/^#/, '').split('?')[0] || '/';
   root.querySelectorAll('.pmi-nav a').forEach((a) => {

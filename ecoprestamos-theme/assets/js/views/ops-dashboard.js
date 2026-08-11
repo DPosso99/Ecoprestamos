@@ -3,6 +3,17 @@ import { escapeHtml, fmtDT, navigate } from '../dom.js';
 
 const MAX_ITEMS = 6;
 
+/**
+ * Genera el HTML de una seccion de listado (pendientes/entregados) del
+ * dashboard, limitando a `MAX_ITEMS` filas visibles con un enlace "Ver mas".
+ * @param {string} title Titulo de la seccion.
+ * @param {Array<Object>} items Prestamos a listar.
+ * @param {string} emptyText Texto a mostrar si `items` esta vacio.
+ * @param {string} pillCls Clase CSS de la pastilla de estado.
+ * @param {string} dotCls Clase CSS del punto de estado.
+ * @param {string} pillText Texto de la pastilla de estado.
+ * @returns {string} HTML de la seccion.
+ */
 function sectionHtml(title, items, emptyText, pillCls, dotCls, pillText) {
   const sliced = items.slice(0, MAX_ITEMS);
   const hasMore = items.length > MAX_ITEMS;
@@ -29,6 +40,13 @@ function sectionHtml(title, items, emptyText, pillCls, dotCls, pillText) {
   `;
 }
 
+/**
+ * Renderiza el panel principal del trabajador (ruta `/ops`): resumen
+ * operativo con conteos y listas de prestamos pendientes/entregados, y
+ * accesos rapidos a las demas pantallas de ops.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @returns {Promise<void>}
+ */
 export async function renderOpsDashboard(root) {
   await store.loans.reload();
   const pendientes = store.loans.prestamos.filter((p) => p.Entregado === 0);

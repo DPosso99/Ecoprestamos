@@ -4,22 +4,43 @@ import { escapeHtml, navigate, todayISO } from '../dom.js';
 const BUSINESS_START = 8 * 60;
 const BUSINESS_END = 18 * 60;
 
+/**
+ * @param {string} dateISO Fecha en formato `YYYY-MM-DD`.
+ * @returns {boolean} true si esa fecha cae de lunes a viernes.
+ */
 function isWeekday(dateISO) {
   const [y, m, d] = dateISO.split('-').map(Number);
   const day = new Date(y, m - 1, d).getDay();
   return day >= 1 && day <= 5;
 }
+/**
+ * @param {string} time Hora en formato `HH:mm`.
+ * @returns {boolean} true si esta dentro del horario de atencion (08:00-18:00).
+ */
 function inBusinessHours(time) {
   if (!time) return false;
   const [hh, mm] = time.split(':').map(Number);
   const minutes = hh * 60 + mm;
   return minutes >= BUSINESS_START && minutes <= BUSINESS_END;
 }
+/**
+ * @param {Date} [date] Fecha a describir (por defecto, hoy).
+ * @returns {string} Nombre del dia de la semana en espanol (ej. "lunes").
+ */
 function weekdayLabelES(date = new Date()) {
   return date.toLocaleDateString('es-CO', { weekday: 'long' });
 }
+/** @returns {string} Fecha y hora combinadas para mostrar ("YYYY-MM-DD · HH:mm"), o "—" si falta alguna. */
 function formatWhen(d, t) { return (!d || !t) ? '—' : `${d} · ${t}`; }
 
+/**
+ * Renderiza el flujo de creacion de solicitud en 3 pasos (ruta
+ * `/solicitud/nueva`, vista de estudiante): recursos y cantidades, dia y
+ * hora, y confirmacion con envio al backend. Bloquea el flujo si el
+ * estudiante ya tiene una solicitud activa o si no selecciono recursos.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @returns {Promise<void>}
+ */
 export async function renderNuevaSolicitud(root) {
   const draft = store.ticket.draft;
   const TODAY = todayISO();
@@ -65,12 +86,15 @@ export async function renderNuevaSolicitud(root) {
     return;
   }
 
+  /** @returns {Array<Object>} Los recursos del catalogo correspondientes a los ids seleccionados en el ticket. */
   function selectedResources() {
     return draft.selectedIds.map((id) => store.catalog.getById(id)).filter(Boolean);
   }
+  /** @returns {number} Suma de unidades solicitadas entre todos los recursos seleccionados. */
   function totalQuantity() {
     return draft.selectedIds.reduce((sum, id) => sum + (draft.quantities[id] ?? 1), 0);
   }
+  /** @returns {Object} Mapa idRecurso -> mensaje de error cuando la cantidad pedida excede lo disponible. */
   function quantityErrors() {
     const errs = {};
     for (const id of draft.selectedIds) {
@@ -84,12 +108,16 @@ export async function renderNuevaSolicitud(root) {
     return errs;
   }
 
+  /** @returns {boolean} true si el paso 1 (recursos y cantidades) es valido. */
   function step1Ok() { return draft.selectedIds.length > 0 && Object.keys(quantityErrors()).length === 0; }
+  /** @returns {boolean} true si el paso 2 (dia y hora) es valido: hoy, dia habil y hora en horario de atencion. */
   function step2Ok() {
     return draft.fechaPrestamo === TODAY && isTodayWeekday && !!draft.horaPrestamo && inBusinessHours(draft.horaPrestamo);
   }
+  /** @returns {boolean} true si el paso 3 (confirmacion) es valido: ambas condiciones aceptadas. */
   function step3Ok() { return draft.acceptCampusRule && draft.acceptTerms; }
 
+  /** @returns {Array<string>} Lista de mensajes de error a mostrar segun el paso actual. */
   function errorsList() {
     const e = [];
     if (draft.selectedIds.length === 0) e.push('Debes seleccionar al menos 1 recurso.');
@@ -103,11 +131,17 @@ export async function renderNuevaSolicitud(root) {
     return e;
   }
 
+  /**
+   * @param {number} n Numero de paso (1-3).
+   * @param {string} label Etiqueta a mostrar.
+   * @returns {string} HTML del chip de navegacion de un paso, con su estado (activo/completado/pendiente).
+   */
   function stepChip(n, label) {
     const cls = step === n ? 'is-active' : step > n ? 'is-done' : '';
     return `<button type="button" class="pmi-step ${cls}" data-step="${n}">${label}</button>`;
   }
 
+  /** @returns {string} HTML del paso 1: lista de recursos seleccionados con cantidad editable. */
   function step1Html() {
     return `
       <h2 class="pmi-h2">Recursos</h2>
@@ -142,6 +176,7 @@ export async function renderNuevaSolicitud(root) {
     `;
   }
 
+  /** @returns {string} HTML del paso 2: selector de fecha (fija a hoy) y hora del prestamo. */
   function step2Html() {
     return `
       <h2 class="pmi-h2">Dia y hora</h2>
@@ -165,6 +200,7 @@ export async function renderNuevaSolicitud(root) {
     `;
   }
 
+  /** @returns {string} HTML del paso 3: resumen, selector de trabajador responsable, notas y checkboxes de aceptacion. */
   function step3Html() {
     const workers = store.users.usuarios.filter((u) => u.Rol === 'Trabajador');
     return `
@@ -203,6 +239,7 @@ export async function renderNuevaSolicitud(root) {
     `;
   }
 
+  /** @returns {string} HTML de la pantalla de confirmacion tras enviar la solicitud exitosamente. */
   function successHtml() {
     return `
       <div class="ui-card pmi-p-8" style="max-width:640px;margin:0 auto;">
@@ -224,6 +261,7 @@ export async function renderNuevaSolicitud(root) {
     `;
   }
 
+  /** Renderiza el paso actual (o la pantalla de exito) y engancha sus listeners. */
   function full() {
     if (submitted) {
       root.innerHTML = successHtml();
@@ -270,6 +308,7 @@ export async function renderNuevaSolicitud(root) {
     attach();
   }
 
+  /** Engancha los listeners de navegacion entre pasos, edicion del ticket y envio final. */
   function attach() {
     root.querySelectorAll('[data-step]').forEach((btn) => {
       btn.addEventListener('click', () => {

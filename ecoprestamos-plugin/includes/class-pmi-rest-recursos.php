@@ -16,6 +16,12 @@ class PMI_Rest_Recursos
 
     private static $select_fields = 'id_recurso, nombre, ubicacion, estado, dia_compra, tipo, cantidad_total, cantidad_disponible, activo';
 
+    /**
+     * Registra las rutas CRUD de recursos (inventario) y la ruta de imagen
+     * bajo /wp-json/pmi/v1/.
+     *
+     * @return void
+     */
     public static function register_routes()
     {
         register_rest_route('pmi/v1', '/resources', array(
@@ -56,6 +62,12 @@ class PMI_Rest_Recursos
         ));
     }
 
+    /**
+     * GET /resources: lista todos los recursos del inventario (sin la
+     * imagen). Requiere sesion iniciada.
+     *
+     * @return WP_REST_Response Lista de recursos.
+     */
     public static function get_resources()
     {
         global $wpdb;
@@ -63,6 +75,13 @@ class PMI_Rest_Recursos
         return rest_ensure_response($rows);
     }
 
+    /**
+     * GET /resources/{id}: obtiene un recurso por su id (sin la imagen).
+     * Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id".
+     * @return WP_REST_Response|WP_Error El recurso, o 404 si no existe.
+     */
     public static function get_resource(WP_REST_Request $request)
     {
         global $wpdb;
@@ -85,6 +104,9 @@ class PMI_Rest_Recursos
      * en requests POST; en PUT (usado por EditResource para reemplazar la
      * imagen, igual que el original con `upload.single` en la ruta PUT) el
      * cuerpo llega crudo y hay que parsearlo a mano.
+     *
+     * @param WP_REST_Request $request Request PUT; se le inyectan los body params y file params parseados.
+     * @return void
      */
     private static function maybe_parse_multipart_put(WP_REST_Request $request)
     {
@@ -150,6 +172,14 @@ class PMI_Rest_Recursos
         }
     }
 
+    /**
+     * Extrae y valida el archivo de imagen ("Imagen") de una request de
+     * creacion/edicion de recurso: valida tamano maximo (MAX_IMAGE_BYTES) y
+     * que el mime-type sea de imagen.
+     *
+     * @param WP_REST_Request $request Request con los file params ya poblados.
+     * @return array|WP_Error [bytes, mime] si hay imagen valida, [null, null] si no se envio imagen, o WP_Error 400 si es invalida.
+     */
     private static function extract_image(WP_REST_Request $request)
     {
         $files = $request->get_file_params();
@@ -172,6 +202,13 @@ class PMI_Rest_Recursos
         return array($bytes, $mime);
     }
 
+    /**
+     * POST /resources: crea un recurso nuevo en el inventario, con imagen
+     * opcional (multipart/form-data). Requiere rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request con body_params (idRecurso, Nombre, Ubicacion, Estado, Dia_compra, Tipo, Cantidad_total, Cantidad_disponible, activo) y opcionalmente file_params["Imagen"].
+     * @return WP_REST_Response|WP_Error Confirmacion con el idRecurso creado, o 400/409 si faltan datos o el recurso ya existe.
+     */
     public static function create_resource(WP_REST_Request $request)
     {
         global $wpdb;
@@ -221,6 +258,14 @@ class PMI_Rest_Recursos
         return rest_ensure_response(array('message' => 'Recurso creado', 'idRecurso' => $id));
     }
 
+    /**
+     * PUT /resources/{id}: actualiza un recurso existente (actualizacion
+     * parcial), con reemplazo opcional de imagen via multipart/form-data.
+     * Requiere rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id" y los campos a actualizar (body params, posiblemente parseados a mano desde multipart).
+     * @return WP_REST_Response|WP_Error Confirmacion, o 404/400 si el recurso no existe o la imagen es invalida.
+     */
     public static function edit_resource(WP_REST_Request $request)
     {
         global $wpdb;
@@ -266,6 +311,13 @@ class PMI_Rest_Recursos
         return rest_ensure_response(array('message' => 'Recurso Actualizado'));
     }
 
+    /**
+     * DELETE /resources/{id}: elimina un recurso del inventario. Requiere
+     * rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id".
+     * @return WP_REST_Response|WP_Error Confirmacion, o 404/409 si no existe o esta asociado a prestamos.
+     */
     public static function delete_resource(WP_REST_Request $request)
     {
         global $wpdb;
@@ -286,6 +338,15 @@ class PMI_Rest_Recursos
         return rest_ensure_response(array('message' => 'Recurso eliminado'));
     }
 
+    /**
+     * GET /resources/{id}/imagen: sirve los bytes crudos de la imagen de un
+     * recurso con su Content-Type original, escribiendo la respuesta
+     * directamente y terminando la ejecucion (no pasa por WP_REST_Response
+     * porque esta siempre serializa a JSON). Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id".
+     * @return WP_Error 404 si el recurso no existe o no tiene imagen; en caso de exito la funcion termina la ejecucion con exit y no retorna.
+     */
     public static function get_resource_image(WP_REST_Request $request)
     {
         global $wpdb;

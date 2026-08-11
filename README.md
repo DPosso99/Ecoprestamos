@@ -124,3 +124,9 @@ publicar cambios en el frontend (es JavaScript plano servido tal cual).
   como "Ocupado").
 - [`ecoprestamos-theme/README.md`](ecoprestamos-theme/README.md) — cómo
   instalar y activar el tema paso a paso.
+- [`ecoprestamos-plugin/API.md`](ecoprestamos-plugin/API.md) — referencia
+  completa de cada endpoint REST (`pmi/v1`): parámetros, body, respuestas
+  y códigos de error.
+- [`ecoprestamos-theme/ARQUITECTURA.md`](ecoprestamos-theme/ARQUITECTURA.md)
+  — cómo está armado el frontend JS (router, store, cliente de API, y el
+  patrón que sigue cada vista).

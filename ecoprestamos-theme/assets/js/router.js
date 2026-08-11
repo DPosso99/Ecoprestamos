@@ -31,6 +31,13 @@ const routes = [
   { path: '/ops/usuarios', guard: 'worker', render: renderOpsUsuarios },
 ];
 
+/**
+ * Convierte una ruta declarativa (ej. `/mis-solicitudes/:id`) en un objeto
+ * con su expresion regular de match y la lista de nombres de parametros,
+ * para poder resolverla contra el hash actual en `matchRoute`.
+ * @param {Object} route Definicion de ruta (path, guard, render, etc.).
+ * @returns {Object} La misma ruta mas `regex` (RegExp) y `keys` (string[]).
+ */
 function compile(route) {
   const keys = [];
   const pattern = route.path.replace(/:([a-zA-Z]+)/g, (_, k) => { keys.push(k); return '([^/]+)'; });
@@ -38,6 +45,10 @@ function compile(route) {
 }
 const compiled = routes.map(compile);
 
+/**
+ * Lee el hash actual de la URL y lo separa en path y query string.
+ * @returns {{ path: string, query: Object }} Ruta (sin `#`) y parametros de query parseados.
+ */
 function parseHash() {
   const raw = window.location.hash.replace(/^#/, '') || '/';
   const [path, queryStr] = raw.split('?');
@@ -45,6 +56,12 @@ function parseHash() {
   return { path: path || '/', query };
 }
 
+/**
+ * Busca, entre las rutas compiladas, la primera cuyo patron matchee `path`,
+ * y extrae los parametros dinamicos (ej. `:id`) ya decodificados.
+ * @param {string} path Ruta actual (sin query string).
+ * @returns {{ route: Object, params: Object }|null} La ruta encontrada y sus params, o `null` si ninguna matchea.
+ */
 function matchRoute(path) {
   for (const r of compiled) {
     const m = r.regex.exec(path);
@@ -58,19 +75,29 @@ function matchRoute(path) {
 }
 
 let dataLoaded = false;
+/**
+ * Carga (una sola vez por sesion de la SPA) los datos globales que
+ * necesitan casi todas las vistas autenticadas: catalogo, prestamos y
+ * usuarios. Llamadas repetidas no vuelven a pedir nada mientras
+ * `dataLoaded` siga en true.
+ * @returns {Promise<void>}
+ */
 async function ensureData() {
   if (dataLoaded) return;
   dataLoaded = true;
   await Promise.all([store.catalog.reload(), store.loans.reload(), store.users.reload()]);
 }
 
-// Vuelve a consultar al backend el usuario actual, por si algo cambio del
-// lado del servidor despues de que esta sesion ya habia iniciado: que lo
-// hayan baneado (equivalente a router/Banear_Usuarios.tsx del proyecto
-// original), o que un administrador le haya cambiado el Rol/Trabajo desde
-// wp-admin (Medialab Prestamos > Usuarios) -- sin esto, sessionStorage se
-// queda con el Rol viejo hasta que la persona vuelve a iniciar sesion, y
-// el home ("/") la sigue mandando a /catalogo en vez de /ops.
+/**
+ * Vuelve a consultar al backend el usuario actual, por si algo cambio del
+ * lado del servidor despues de que esta sesion ya habia iniciado: que lo
+ * hayan baneado (equivalente a router/Banear_Usuarios.tsx del proyecto
+ * original), o que un administrador le haya cambiado el Rol/Trabajo desde
+ * wp-admin (Medialab Prestamos > Usuarios) -- sin esto, sessionStorage se
+ * queda con el Rol viejo hasta que la persona vuelve a iniciar sesion, y
+ * el home ("/") la sigue mandando a /catalogo en vez de /ops.
+ * @returns {Promise<void>}
+ */
 async function refreshUserStatus() {
   if (!store.auth.user?.Correo) return;
   try {
@@ -89,6 +116,11 @@ async function refreshUserStatus() {
   } catch { /* si falla la consulta, no bloquear al usuario */ }
 }
 
+/**
+ * Reemplaza el contenido del contenedor por la pantalla de "cuenta
+ * suspendida", con boton para cerrar sesion.
+ * @param {HTMLElement} container Elemento donde se monta la pantalla.
+ */
 function renderBanned(container) {
   container.innerHTML = `
     <div class="pmi-auth-shell">
@@ -108,6 +140,13 @@ function renderBanned(container) {
   });
 }
 
+/**
+ * Handler central del router: resuelve la ruta actual a partir del hash,
+ * aplica los guards de autenticacion/rol/baneo correspondientes, y
+ * finalmente delega el renderizado al `render` de la vista que matchee.
+ * Se ejecuta en cada `hashchange` y cada vez que se dispara `pmi:rerender`.
+ * @returns {Promise<void>}
+ */
 async function render() {
   const root = document.getElementById('root');
   if (!root) return;
@@ -180,12 +219,20 @@ async function render() {
   await route.render(document.getElementById('pmi-main'), { params, query });
 }
 
+/**
+ * Inicializa el router de la SPA: engancha `render` a los cambios de hash
+ * y al evento interno `pmi:rerender`, y dispara el primer render.
+ */
 export function startRouter() {
   window.addEventListener('hashchange', render);
   window.addEventListener('pmi:rerender', render);
   render();
 }
 
+/**
+ * Fuerza un nuevo render de la vista actual sin cambiar de ruta (por
+ * ejemplo, despues de una mutacion de estado que no toca el hash).
+ */
 export function rerender() {
   window.dispatchEvent(new Event('pmi:rerender'));
 }

@@ -5,6 +5,13 @@ import { openModal, closeModal } from '../components/modal.js';
 
 const UBICACIONES = ['201A', '201B', '201C', '201D', '315', '206', '208', 'Acustica', 'Gessel (auditorio)', 'Gessel (VIP)', 'Gessel (camara)', 'Gessel (cuarto de control)'];
 
+/**
+ * Renderiza la gestion de catalogo del trabajador (ruta `/ops/catalogo`):
+ * lista buscable de recursos con modales para crear, editar (incluye
+ * subida de imagen) y eliminar.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @returns {Promise<void>}
+ */
 export async function renderOpsCatalogo(root) {
   await store.catalog.reload();
 
@@ -14,12 +21,17 @@ export async function renderOpsCatalogo(root) {
 
   const norm = (s) => (s ?? '').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
 
+  /** @returns {Array<Object>} Recursos del catalogo que coinciden con la busqueda actual. */
   function list() {
     const nq = norm(q);
     if (!nq) return store.catalog.recursos;
     return store.catalog.recursos.filter((r) => norm(`${r.Nombre} ${r.Tipo} ${r.Ubicacion} ${r.idRecurso}`).includes(nq));
   }
 
+  /**
+   * @param {Object} r Recurso.
+   * @returns {string} HTML de la fila de un recurso en la lista de administracion.
+   */
   function itemHtml(r) {
     return `
       <div class="ui-card-inner pmi-p-4 pmi-flex pmi-justify-between pmi-items-start pmi-gap-4">
@@ -39,6 +51,7 @@ export async function renderOpsCatalogo(root) {
     `;
   }
 
+  /** Renderiza la vista completa (buscador + lista) y engancha sus listeners. */
   function full() {
     const items = list();
     root.innerHTML = `
@@ -71,6 +84,10 @@ export async function renderOpsCatalogo(root) {
     root.querySelectorAll('[data-delete]').forEach((btn) => btn.addEventListener('click', () => openDelete(btn.dataset.delete)));
   }
 
+  /**
+   * Abre el modal de creacion/edicion de recurso, precargado si `id` existe.
+   * @param {string} [id] idRecurso a editar; si se omite, es un recurso nuevo.
+   */
   function openEditor(id) {
     editingId = id || null;
     imageFile = null;
@@ -154,6 +171,13 @@ export async function renderOpsCatalogo(root) {
     });
   }
 
+  /**
+   * Valida y guarda el formulario de recurso del modal (crea o actualiza
+   * segun `editingId`, via `api.createResource`/`api.updateResource`), y
+   * recarga el catalogo al terminar.
+   * @param {HTMLElement} panel Elemento `.pmi-modal` del modal abierto.
+   * @returns {Promise<void>}
+   */
   async function saveResource(panel) {
     const form = panel.querySelector('#pmi-resource-form');
     const fd = new FormData(form);
@@ -192,6 +216,10 @@ export async function renderOpsCatalogo(root) {
     }
   }
 
+  /**
+   * Abre el modal de confirmacion de eliminacion de un recurso.
+   * @param {string} id idRecurso a eliminar.
+   */
   function openDelete(id) {
     editingId = id;
     openModal({

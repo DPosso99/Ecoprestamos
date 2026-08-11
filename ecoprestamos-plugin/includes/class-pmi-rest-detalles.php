@@ -13,6 +13,12 @@ if (!defined('ABSPATH')) {
  */
 class PMI_Rest_Detalles
 {
+    /**
+     * Registra las rutas de detalle de prestamo (recursos asociados a cada
+     * prestamo) bajo /wp-json/pmi/v1/.
+     *
+     * @return void
+     */
     public static function register_routes()
     {
         register_rest_route('pmi/v1', '/loans/alldetails', array(
@@ -41,6 +47,16 @@ class PMI_Rest_Detalles
         ));
     }
 
+    /**
+     * POST /loans/{id}/details: agrega uno o mas recursos a un prestamo
+     * existente. Requiere sesion iniciada. El INSERT dispara el trigger de
+     * inventario que descuenta Cantidad_disponible; si MySQL lo aborta
+     * (stock insuficiente, recurso "Activo fijo" o recurso inexistente) se
+     * traduce a un 400 con mensaje legible.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id" y un body JSON con "recurso" (lista de {id, cantidad}).
+     * @return WP_REST_Response|WP_Error Confirmacion con idPrestamo y recursos agregados, o error 404/400/500.
+     */
     public static function add_detail(WP_REST_Request $request)
     {
         global $wpdb;
@@ -85,6 +101,13 @@ class PMI_Rest_Detalles
         return rest_ensure_response(array('message' => 'Recursos agregados al prestamo', 'idPrestamo' => $id_prestamo, 'recurso' => $recursos));
     }
 
+    /**
+     * GET /loans/{id}/details: lista los recursos asociados a un prestamo,
+     * con sus datos de recurso (nombre, ubicacion, estado, tipo). Requiere sesion iniciada.
+     *
+     * @param WP_REST_Request $request Request con el parametro de ruta "id".
+     * @return WP_REST_Response|WP_Error Lista de detalles, o 404 si el prestamo no tiene recursos.
+     */
     public static function get_details(WP_REST_Request $request)
     {
         global $wpdb;
@@ -105,6 +128,12 @@ class PMI_Rest_Detalles
         return rest_ensure_response(self::map_rows($rows));
     }
 
+    /**
+     * GET /loans/alldetails: lista todos los detalles de prestamo del sistema
+     * (todos los prestamos), con nombre y tipo del recurso. Requiere sesion iniciada.
+     *
+     * @return WP_REST_Response Lista completa de detalles de prestamo.
+     */
     public static function get_all_details()
     {
         global $wpdb;
@@ -126,6 +155,13 @@ class PMI_Rest_Detalles
         }, $rows));
     }
 
+    /**
+     * DELETE /loans/{id}/details/{recurso_id}: quita un recurso de un
+     * prestamo. Requiere rol Trabajador.
+     *
+     * @param WP_REST_Request $request Request con los parametros de ruta "id" y "recurso_id".
+     * @return WP_REST_Response|WP_Error Confirmacion, o 404 si el recurso no estaba en ese prestamo.
+     */
     public static function delete_detail(WP_REST_Request $request)
     {
         global $wpdb;
@@ -145,6 +181,13 @@ class PMI_Rest_Detalles
         return rest_ensure_response(array('message' => 'Recurso eliminado del prestamo'));
     }
 
+    /**
+     * Traduce filas de detalle_prestamo (join con recurso) a los nombres
+     * PascalCase que espera el frontend original.
+     *
+     * @param array $rows Filas crudas de la consulta (columnas snake_case).
+     * @return array Filas con las claves esperadas por el frontend.
+     */
     private static function map_rows($rows)
     {
         return array_map(function ($row) {

@@ -3,6 +3,13 @@ import { api } from '../api.js';
 import { escapeHtml, navigate } from '../dom.js';
 import { openModal, closeModal } from '../components/modal.js';
 
+/**
+ * Renderiza la administracion de usuarios del trabajador (ruta
+ * `/ops/usuarios`): lista buscable/filtrable con modales para crear,
+ * editar, banear/desbanear y eliminar usuarios.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @returns {Promise<void>}
+ */
 export async function renderOpsUsuarios(root) {
   await store.users.reload();
 
@@ -11,6 +18,7 @@ export async function renderOpsUsuarios(root) {
 
   const norm = (s) => (s ?? '').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
 
+  /** @returns {Array<Object>} Usuarios que pasan la busqueda y el filtro de rol/baneo actuales. */
   function list() {
     const nq = norm(q);
     let items = !nq ? store.users.usuarios : store.users.usuarios.filter((u) => norm(`${u.Nombre} ${u.Correo} ${u.Rol} ${u.numero}`).includes(nq));
@@ -20,6 +28,10 @@ export async function renderOpsUsuarios(root) {
     return items;
   }
 
+  /**
+   * @param {Object} u Usuario.
+   * @returns {string} HTML de la fila de un usuario en la lista de administracion.
+   */
   function itemHtml(u) {
     const isMe = u.Correo === store.auth.user?.Correo;
     return `
@@ -45,6 +57,7 @@ export async function renderOpsUsuarios(root) {
     `;
   }
 
+  /** Renderiza la vista completa (buscador, filtros, lista) y engancha sus listeners. */
   function full() {
     const items = list();
     const filters = [['todos', 'Todos'], ['estudiantes', 'Estudiantes'], ['trabajadores', 'Trabajadores'], ['baneados', 'Baneados']];
@@ -84,6 +97,10 @@ export async function renderOpsUsuarios(root) {
     root.querySelectorAll('[data-ban]').forEach((btn) => btn.addEventListener('click', () => toggleBan(btn.dataset.ban)));
   }
 
+  /**
+   * Abre el modal de creacion/edicion de usuario, precargado si `correo` existe.
+   * @param {string} [correo] Correo del usuario a editar; si se omite, es un usuario nuevo.
+   */
   function openEditor(correo) {
     const editing = correo ? store.users.getByCorreo(correo) : null;
 
@@ -145,6 +162,14 @@ export async function renderOpsUsuarios(root) {
     });
   }
 
+  /**
+   * Valida y guarda el formulario de usuario del modal (crea o actualiza
+   * segun `editing`, via `api.createUser`/`api.updateUser`), y recarga la
+   * lista de usuarios al terminar.
+   * @param {HTMLElement} panel Elemento `.pmi-modal` del modal abierto.
+   * @param {Object|null} editing Usuario que se esta editando, o `null` si es uno nuevo.
+   * @returns {Promise<void>}
+   */
   async function saveUser(panel, editing) {
     const fd = new FormData(panel.querySelector('#pmi-user-form'));
     const errorSlot = panel.querySelector('#pmi-user-error');
@@ -185,6 +210,10 @@ export async function renderOpsUsuarios(root) {
     }
   }
 
+  /**
+   * Abre el modal de confirmacion de eliminacion de un usuario.
+   * @param {string} correo Correo del usuario a eliminar.
+   */
   function openDelete(correo) {
     openModal({
       title: 'Eliminar usuario',
@@ -214,6 +243,12 @@ export async function renderOpsUsuarios(root) {
     });
   }
 
+  /**
+   * Alterna el estado de baneo de un usuario (`api.updateUser` con
+   * `Baneado` invertido) y recarga la lista.
+   * @param {string} correo Correo del usuario.
+   * @returns {Promise<void>}
+   */
   async function toggleBan(correo) {
     const u = store.users.getByCorreo(correo);
     if (!u) return;

@@ -30,6 +30,7 @@ class PMI_Error_Log
      * @param string $code    Identificador corto y estable (ej. "pmi_db_error").
      * @param string $message Descripcion legible del problema.
      * @param array  $context Datos adicionales (endpoint, sql, etc.).
+     * @return array La entrada de log registrada (ver estructura en log()).
      */
     public static function report($code, $message, array $context = array())
     {
@@ -41,6 +42,11 @@ class PMI_Error_Log
     /**
      * Guarda el error en el buffer rotativo sin enviar correo. Usar
      * report() salvo que el llamador quiera controlar el envio aparte.
+     *
+     * @param string $code    Identificador corto y estable (ej. "pmi_db_error").
+     * @param string $message Descripcion legible del problema.
+     * @param array  $context Datos adicionales (endpoint, sql, etc.).
+     * @return array Entrada de log con time, code, message, context, site y blog_id.
      */
     public static function log($code, $message, array $context = array())
     {
@@ -69,6 +75,12 @@ class PMI_Error_Log
         return $entry;
     }
 
+    /**
+     * Devuelve las entradas mas recientes del buffer rotativo de errores.
+     *
+     * @param int $limit Numero maximo de entradas a devolver.
+     * @return array Lista de entradas de log, mas reciente primero.
+     */
     public static function get_recent($limit = 20)
     {
         $log = get_option(self::OPTION, array());
@@ -78,11 +90,23 @@ class PMI_Error_Log
         return array_slice($log, 0, $limit);
     }
 
+    /**
+     * Vacia por completo el buffer rotativo de errores.
+     *
+     * @return void
+     */
     public static function clear()
     {
         delete_option(self::OPTION);
     }
 
+    /**
+     * Envia el correo de aviso para $entry si no esta dentro de la ventana
+     * de throttle (NOTIFY_THROTTLE) para ese mismo codigo de error y sitio.
+     *
+     * @param array $entry Entrada de log (ver log()).
+     * @return void
+     */
     private static function maybe_notify(array $entry)
     {
         $throttle_key = 'pmi_err_notified_' . md5($entry['code'] . '|' . $entry['blog_id']);
@@ -94,6 +118,13 @@ class PMI_Error_Log
         self::send_email($entry);
     }
 
+    /**
+     * Compone y envia el correo de aviso de error a NOTIFY_EMAIL con los
+     * datos de $entry.
+     *
+     * @param array $entry Entrada de log (ver log()).
+     * @return void
+     */
     private static function send_email(array $entry)
     {
         $subject = sprintf('[Medialab Prestamos] Error en %s: %s', parse_url($entry['site'], PHP_URL_HOST), $entry['code']);
@@ -124,6 +155,13 @@ class PMI_Error_Log
         wp_mail(self::NOTIFY_EMAIL, $subject, implode("\n", $lines));
     }
 
+    /**
+     * Envia un correo de prueba a NOTIFY_EMAIL (usado desde el boton
+     * "Enviar correo de prueba" del panel de administracion), sin registrar
+     * nada en el buffer de errores.
+     *
+     * @return void
+     */
     public static function send_test_email()
     {
         self::send_email(array(
@@ -140,6 +178,8 @@ class PMI_Error_Log
      * Captura errores fatales de PHP originados dentro del plugin (o del
      * tema de la app) que de otro modo solo dejarian un 500 sin rastro,
      * y los reporta igual que un error manejado.
+     *
+     * @return void
      */
     public static function register_fatal_handler()
     {

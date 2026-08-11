@@ -40,6 +40,10 @@ PMI_Error_Log::register_fatal_handler();
 
 register_activation_hook(__FILE__, array('PMI_Activator', 'activate'));
 
+/**
+ * Registra todas las rutas REST del plugin bajo /wp-json/pmi/v1/ cuando
+ * WordPress inicializa la REST API.
+ */
 add_action('rest_api_init', function () {
     PMI_Rest_Usuarios::register_routes();
     PMI_Rest_Recursos::register_routes();
@@ -56,6 +60,8 @@ new PMI_Admin();
  * Un subsitio creado despues nunca recibe sus tablas propias (wp_N_pmi_*) y
  * cualquier request a la API REST de ese sitio falla con "Table doesn't
  * exist". Este hook cubre ese caso creando las tablas del subsitio nuevo.
+ *
+ * @param int $blog_id ID del subsitio recien creado.
  */
 add_action('wpmu_new_blog', function ($blog_id) {
     if (!is_plugin_active_for_network(plugin_basename(PMI_PLUGIN_FILE))) {

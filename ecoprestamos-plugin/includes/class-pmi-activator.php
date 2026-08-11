@@ -21,6 +21,14 @@ class PMI_Activator
     const DB_VERSION = '1.0.0';
     const NOTICES_OPTION = 'pmi_activation_notices';
 
+    /**
+     * Corre en register_activation_hook(): crea/actualiza tablas, restricciones
+     * y triggers, genera el secreto de autenticacion si falta, y deja
+     * registrada la version de esquema y los avisos de administrador que
+     * hayan resultado del proceso.
+     *
+     * @return void
+     */
     public static function activate()
     {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -39,6 +47,14 @@ class PMI_Activator
         update_option(self::NOTICES_OPTION, $notices);
     }
 
+    /**
+     * Lee un archivo .sql de la carpeta sql/ del plugin y reemplaza los
+     * placeholders %%PREFIX%% y %%CHARSET%% por el prefijo de tabla real y
+     * el charset/collate del sitio.
+     *
+     * @param string $filename Nombre del archivo dentro de la carpeta sql/.
+     * @return string Contenido del archivo SQL con los placeholders resueltos.
+     */
     private static function read_sql_file($filename)
     {
         global $wpdb;
@@ -63,6 +79,8 @@ class PMI_Activator
      * medio de un request HTTP (ej. desde el boton "Verificar y reparar")
      * ese output rompe la respuesta con "headers already sent" antes del
      * redirect. Se silencian puntualmente esos warnings sin tocar el core.
+     *
+     * @return void
      */
     private static function create_tables()
     {
@@ -82,6 +100,10 @@ class PMI_Activator
      * .sql mencionan literalmente ";" y el marcador "-- @@TRIGGER@@" como
      * texto de ejemplo, y un split ingenuo los confundiria con separadores
      * reales.
+     *
+     * @param string      $sql       Bloque SQL con posibles lineas de comentario "--".
+     * @param string|null $keep_line Linea exacta (ya recortada) que se debe conservar aunque empiece con "--".
+     * @return string SQL sin lineas de comentario, preservando $keep_line si se indico.
      */
     private static function strip_comment_lines($sql, $keep_line = null)
     {
@@ -103,6 +125,15 @@ class PMI_Activator
         return implode("\n", $kept);
     }
 
+    /**
+     * Ejecuta las sentencias de sql/003-constraints.sql (restricciones
+     * FOREIGN KEY, que dbDelta() no soporta) una por una, ignorando el error
+     * si la restriccion ya existe y acumulando en $notices cualquier otro
+     * fallo (ej. falta de privilegios) para mostrarlo luego en el admin.
+     *
+     * @param array $notices Lista de avisos de administrador, se le agregan mensajes por referencia.
+     * @return void
+     */
     private static function create_constraints(array &$notices)
     {
         global $wpdb;
@@ -129,6 +160,15 @@ class PMI_Activator
         }
     }
 
+    /**
+     * Recrea los triggers de inventario de sql/002-triggers.sql (los borra
+     * primero con DROP TRIGGER IF EXISTS y los vuelve a crear), acumulando en
+     * $notices un aviso legible por cada trigger que no se pudo crear (ej.
+     * falta el privilegio TRIGGER en la base de datos).
+     *
+     * @param array $notices Lista de avisos de administrador, se le agregan mensajes por referencia.
+     * @return void
+     */
     private static function create_triggers(array &$notices)
     {
         global $wpdb;

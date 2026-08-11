@@ -2,14 +2,24 @@ import { store } from '../state.js';
 import { escapeHtml, navigate } from '../dom.js';
 import { openModal, closeModal } from '../components/modal.js';
 
+/** Normaliza texto para busqueda: minusculas, sin tildes, sin espacios sobrantes. */
 const norm = (s) => (s ?? '').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
 
+/** Metadatos visuales (texto, clases, si esta deshabilitado) por cada `Estado` de recurso. */
 const ESTADO_META = {
   Disponible: { text: 'Disponible', cls: 'pmi-pill-success', dot: 'pmi-dot-success', disabled: false, helper: '' },
   Ocupado: { text: 'Ocupado', cls: 'pmi-pill-warning', dot: 'pmi-dot-warning', disabled: true, helper: 'Esta prestado actualmente.' },
   'Activo fijo': { text: 'Activo fijo', cls: 'pmi-pill-neutral', dot: 'pmi-dot-neutral', disabled: true, helper: 'Este recurso no esta disponible para prestamo.' },
 };
 
+/**
+ * Renderiza el catalogo de recursos (ruta `/catalogo`, vista de estudiante):
+ * grilla filtrable de recursos con seleccion multiple hacia el ticket de
+ * solicitud, y modal de detalle por recurso.
+ * @param {HTMLElement} root Elemento contenedor donde se monta la vista.
+ * @param {{ params: Object, query: Object }} ctx Parametros de ruta (sin uso aqui) y query (`q` precarga la busqueda).
+ * @returns {Promise<void>}
+ */
 export async function renderCatalogo(root, { query }) {
   await store.catalog.reload();
 
@@ -17,12 +27,15 @@ export async function renderCatalogo(root, { query }) {
   let selectedTipo = 'todos';
   let selectedDisponibilidad = 'todos';
 
+  /** @returns {Array<Object>} Recursos visibles segun rol (los "Activo fijo" solo los ve el Trabajador). */
   const visibleResources = () => store.catalog.recursos.filter((r) => store.auth.isWorker || r.Estado !== 'Activo fijo');
 
+  /** @returns {Array<string>} Lista ordenada y sin duplicados de tipos de recurso disponibles para filtrar. */
   function tipos() {
     return Array.from(new Set(visibleResources().map((r) => r.Tipo))).sort();
   }
 
+  /** @returns {Array<Object>} Recursos visibles que pasan los filtros de tipo, disponibilidad y busqueda actuales. */
   function filtered() {
     const q = norm(searchQuery);
     return visibleResources().filter((r) => {
@@ -34,6 +47,10 @@ export async function renderCatalogo(root, { query }) {
     });
   }
 
+  /**
+   * @param {Object} r Recurso.
+   * @returns {string} HTML de la tarjeta de un recurso en la grilla del catalogo.
+   */
   function resourceCardHtml(r) {
     const s = ESTADO_META[r.Estado] || ESTADO_META.Disponible;
     const selected = store.ticket.draft.selectedIds.includes(r.idRecurso);
@@ -67,6 +84,7 @@ export async function renderCatalogo(root, { query }) {
     `;
   }
 
+  /** @returns {string} HTML de la barra flotante "Crear solicitud" (vacio si no hay recursos seleccionados). */
   function ticketBarHtml() {
     const count = store.ticket.draft.selectedIds.length;
     if (count <= 0) return '';
@@ -86,6 +104,10 @@ export async function renderCatalogo(root, { query }) {
     `;
   }
 
+  /**
+   * @param {Array<Object>} list Lista ya filtrada, para mostrar el conteo de resultados.
+   * @returns {string} HTML del encabezado del catalogo (titulo, contadores, boton limpiar filtros).
+   */
   function headerHtml(list) {
     const hasFilters = selectedTipo !== 'todos' || selectedDisponibilidad !== 'todos' || norm(searchQuery).length > 0;
     let disponible = 0, ocupado = 0;
@@ -105,6 +127,7 @@ export async function renderCatalogo(root, { query }) {
     `;
   }
 
+  /** @returns {string} HTML del panel lateral de filtros (tipo y disponibilidad). */
   function filtersHtml() {
     const opts = ['todos', ...tipos()];
     return `
@@ -132,6 +155,7 @@ export async function renderCatalogo(root, { query }) {
     `;
   }
 
+  /** Renderiza la vista completa (filtros + grilla + barra de ticket) y engancha sus listeners. */
   function full() {
     const list = filtered();
     root.innerHTML = `
@@ -154,6 +178,7 @@ export async function renderCatalogo(root, { query }) {
     attach();
   }
 
+  /** Engancha los listeners de filtros, tarjetas y barra de ticket tras cada `full()`. */
   function attach() {
     root.querySelector('#pmi-filter-tipo')?.addEventListener('change', (e) => { selectedTipo = e.target.value; full(); });
     root.querySelectorAll('input[name="disp"]').forEach((r) => {
@@ -176,6 +201,7 @@ export async function renderCatalogo(root, { query }) {
     });
   }
 
+  /** Restablece filtros y busqueda a su estado por defecto. */
   function clearAll() {
     selectedTipo = 'todos';
     selectedDisponibilidad = 'todos';
@@ -183,6 +209,10 @@ export async function renderCatalogo(root, { query }) {
     full();
   }
 
+  /**
+   * Abre el modal de detalle de un recurso, con boton para agregarlo/quitarlo del ticket.
+   * @param {string} id idRecurso.
+   */
   function openDetail(id) {
     const r = store.catalog.getById(id);
     if (!r) return;
