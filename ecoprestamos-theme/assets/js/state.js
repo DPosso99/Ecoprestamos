@@ -187,6 +187,11 @@ function normalizeResource(row) {
     Cantidad_disponible: rawDisp != null && !isNaN(Number(rawDisp)) ? Number(rawDisp) : null,
     activo: row.activo ?? 'N/A',
     imagenUrl: api.resourceImageUrl(idRecurso),
+    // El backend dice si el recurso tiene foto. Sin este dato el catalogo pedia
+    // una imagen por recurso y el plugin respondia 404 en los que no la tienen;
+    // con el catalogo lleno de fotos seria una peticion por recurso (cada una
+    // atravesando PHP y leyendo un LONGBLOB) en cada render.
+    tieneImagen: Number(row.tiene_imagen ?? row.tieneImagen ?? 0) === 1,
   };
 }
 

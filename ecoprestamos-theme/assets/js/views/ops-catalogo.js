@@ -142,8 +142,8 @@ export async function renderOpsCatalogo(root) {
         <div class="pmi-resource-card-head pmi-flex pmi-justify-between pmi-items-start pmi-gap-4">
           <div class="pmi-flex pmi-gap-4 pmi-items-center" style="min-width:240px;flex:1;">
             <div style="width:60px;height:60px;border-radius:10px;overflow:hidden;border:1px solid var(--eafit-border);background:var(--eafit-surface);display:grid;place-items:center;flex-shrink:0;">
-              ${r.imagenUrl
-                ? `<img src="${escapeHtml(r.imagenUrl)}" onerror="this.style.display='none'" style="width:100%;height:100%;object-fit:cover;" />`
+              ${r.tieneImagen
+                ? `<img src="${escapeHtml(r.imagenUrl)}" loading="lazy" onerror="this.style.display='none'" style="width:100%;height:100%;object-fit:cover;" />`
                 : `<div class="pmi-avatar" style="width:100%;height:100%;font-size:18px;font-weight:700;border-radius:0;">${escapeHtml((r.Nombre || '?').slice(0, 2).toUpperCase())}</div>`}
             </div>
             <div class="pmi-min-w-0" style="flex:1;">
@@ -505,7 +505,7 @@ export async function renderOpsCatalogo(root) {
           <div style="display:grid;grid-template-columns:130px 1fr;gap:20px;align-items:start;">
             <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
               <div id="pmi-preview" style="height:110px;width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--eafit-border);background:var(--eafit-surface);display:grid;place-items:center;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                ${r?.imagenUrl ? `<img src="${escapeHtml(r.imagenUrl)}" style="height:100%;width:100%;object-fit:cover;" onerror="this.style.display='none'" />` : '<span class="pmi-text-xs pmi-muted" style="font-weight:500;">Sin foto</span>'}
+                ${r?.tieneImagen ? `<img src="${escapeHtml(r.imagenUrl)}" loading="lazy" style="height:100%;width:100%;object-fit:cover;" onerror="this.style.display='none'" />` : '<span class="pmi-text-xs pmi-muted" style="font-weight:500;">Sin foto</span>'}
               </div>
               <label class="ui-btn ui-btn-ghost ui-btn-sm" style="cursor:pointer;width:100%;text-align:center;font-size:12px;height:32px;">
                 Subir foto

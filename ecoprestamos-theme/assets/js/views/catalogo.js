@@ -219,9 +219,12 @@ export async function renderCatalogo(root, { query }) {
   function resourceCardHtml(r) {
     const status = getResourceStatus(r);
     const selected = store.ticket.draft.selectedIds.includes(r.idRecurso);
-    // `state.js` siempre arma una `imagenUrl`, exista o no la imagen en el
-    // servidor: el placeholder se inserta desde `attach()` si la carga falla.
-    const media = `<img src="${escapeHtml(r.imagenUrl)}" alt="${escapeHtml(r.Nombre)}" data-media-img />`;
+    // Si el backend dice que no hay foto, se pinta el placeholder directamente:
+    // pedirla daria un 404 por recurso. El respaldo de `attach()` sigue ahi por
+    // si la imagen existe pero falla al cargar.
+    const media = r.tieneImagen
+      ? `<img src="${escapeHtml(r.imagenUrl)}" alt="${escapeHtml(r.Nombre)}" loading="lazy" data-media-img />`
+      : cardPlaceholderHtml(r);
 
     // Pastillas complementarias para mostrar claramente el estado de las unidades si coexisten
     let extraPills = '';
@@ -442,7 +445,9 @@ export async function renderCatalogo(root, { query }) {
       bodyHtml: `
         <div class="pmi-grid pmi-grid-2" style="gap:24px;align-items:start;">
           <div class="ui-card pmi-resource-media" style="height:230px;border-radius:12px;overflow:hidden;border:1px solid var(--eafit-border);">
-            <img src="${escapeHtml(r.imagenUrl)}" alt="${escapeHtml(r.Nombre)}" data-media-img style="width:100%;height:100%;object-fit:cover;" />
+            ${r.tieneImagen
+              ? `<img src="${escapeHtml(r.imagenUrl)}" alt="${escapeHtml(r.Nombre)}" loading="lazy" data-media-img style="width:100%;height:100%;object-fit:cover;" />`
+              : cardPlaceholderHtml(r)}
           </div>
 
           <div class="pmi-flex-col pmi-gap-3">

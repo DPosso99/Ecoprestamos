@@ -29,8 +29,14 @@ class PMI_Rest_Recursos
      * (LONGBLOB), que no es serializable a JSON y se sirve por su propio
      * endpoint. Publica porque las busquedas de PMI_Rest_Busqueda leen las
      * mismas columnas.
+     *
+     * `tiene_imagen` va calculado aqui para que el cliente sepa si merece la
+     * pena pedir la foto: sin ese dato, el catalogo pedia una imagen por recurso
+     * y el plugin respondia 404 en los que no la tienen (y con el catalogo lleno
+     * de fotos, una peticion por recurso a la vez que atraviesa PHP y lee un
+     * LONGBLOB). `LENGTH()` sobre el blob no lee los bytes: usa el largo.
      */
-    public static $select_fields = 'id_recurso, nombre, ubicacion, estado, dia_compra, tipo, cantidad_total, cantidad_disponible, activo';
+    public static $select_fields = 'id_recurso, nombre, ubicacion, estado, dia_compra, tipo, cantidad_total, cantidad_disponible, activo, (imagen IS NOT NULL AND LENGTH(imagen) > 0) AS tiene_imagen';
 
     /**
      * Borra los temporales del parseo manual de multipart al terminar la
@@ -494,6 +500,11 @@ class PMI_Rest_Recursos
         // el contenido como HTML/SVG en el origen del sitio.
         header('X-Content-Type-Options: nosniff');
         header('Content-Disposition: inline');
+        // La foto no cambia a cada rato y sale de la base en cada peticion, asi
+        // que se cachea en privado un rato corto: si el MediaLab reemplaza una
+        // imagen, el cambio se ve en minutos y no se re-descarga en cada
+        // navegacion por el catalogo.
+        header('Cache-Control: private, max-age=300');
         echo $row['imagen'];
         exit;
     }
