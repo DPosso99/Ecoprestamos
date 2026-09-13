@@ -52,7 +52,7 @@ function fieldError(name, value, country) {
   switch (name) {
     case 'Correo':
       if (!value) return 'El correo es requerido.';
-      if (!isEafitEmail(value)) return 'Debe ser un correo institucional (@eafit.edu.co).';
+      if (!isEafitEmail(value)) return 'Solo se admiten correos institucionales (@eafit.edu.co).';
       return '';
     case 'Nombre':
       if (!value) return 'El nombre es requerido.';
@@ -118,14 +118,13 @@ export async function renderLogin(root) {
       <div class="pmi-auth-shell">
         <div class="pmi-auth-box">
           <div style="text-align:center; margin-bottom:16px;">
-            <img src="https://ecolabs.eafit.edu.co/wp-content/uploads/2026/08/logo-eafit-azul-scaled.png" alt="EAFIT" style="max-width:180px; height:auto; margin-bottom:12px;" />
+            <img src="${window.PMI_CONFIG?.logoUrl || '/wp-content/themes/ecoprestamos-theme/pix/Logo_EAFIT.svg'}" alt="EAFIT" style="max-width:180px; height:auto; margin-bottom:12px;" />
             <div class="pmi-h1">Medialab</div>
             <div class="pmi-muted pmi-text-sm">Sistema de prestamos</div>
           </div>
 
           <div class="ui-card pmi-p-8">
-            <h1 class="pmi-h2" style="text-align:center;">${tab === 'login' ? 'Iniciar sesion' : 'Crear cuenta'}</h1>
-            ${tab === 'register' ? '<p class="pmi-muted pmi-text-sm" style="text-align:center;margin-top:6px;">Registrate con tu correo @eafit.edu.co.</p>' : ''}
+            <h1 class="pmi-h2" style="text-align:center;">${tab === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</h1>
 
             <div class="pmi-tabs" style="margin-top:20px;">
               <button type="button" class="pmi-tab ${tab === 'login' ? 'is-active' : ''}" data-tab="login">Ingresar</button>
@@ -144,17 +143,19 @@ export async function renderLogin(root) {
   /**
    * @param {string|null} error Error general a mostrar (ej. credenciales invalidas).
    * @param {boolean} loading Si el submit esta en curso (deshabilita el boton).
+   * @param {string} [emailValue] Valor del correo para mantenerlo tras un error.
    * @returns {string} HTML del formulario de login.
    */
-  function loginFormHtml(error, loading) {
+  function loginFormHtml(error, loading, emailValue = '') {
     return `
       <form id="pmi-login-form" class="pmi-flex-col pmi-gap-4">
         <label class="pmi-field">
-          <span class="pmi-label">Correo</span>
-          <input class="ui-input" type="text" name="Correo" placeholder="Correo institucional" required autocomplete="username" />
+          <span class="pmi-label">Correo institucional</span>
+          <input class="ui-input" type="email" name="Correo" placeholder="usuario@eafit.edu.co" value="${escapeHtml(emailValue)}" required autocomplete="username" />
+          <span class="pmi-text-xs pmi-muted" style="margin-top:4px;display:block;">Solo se admiten correos terminados en <b>@eafit.edu.co</b></span>
         </label>
         <label class="pmi-field">
-          <span class="pmi-label">Contrasena</span>
+          <span class="pmi-label">Contraseña</span>
           <input class="ui-input" type="password" name="Contrasena" placeholder="********" required autocomplete="current-password" />
         </label>
         ${error ? `<div class="pmi-alert pmi-alert-danger">${escapeHtml(error)}</div>` : ''}
@@ -181,8 +182,9 @@ export async function renderLogin(root) {
     return `
       <form id="pmi-register-form" class="pmi-flex-col pmi-gap-4" novalidate>
         <label class="pmi-field">
-          <span class="pmi-label">Correo</span>
-          <input class="ui-input ${errors.Correo ? 'ui-input-error' : ''}" type="email" name="Correo" placeholder="Correo institucional" autocomplete="username" value="${escapeHtml(v.Correo || '')}" />
+          <span class="pmi-label">Correo institucional</span>
+          <input class="ui-input ${errors.Correo ? 'ui-input-error' : ''}" type="email" name="Correo" placeholder="usuario@eafit.edu.co" autocomplete="username" value="${escapeHtml(v.Correo || '')}" />
+          <span class="pmi-text-xs pmi-muted" style="margin-top:4px;display:block;">Solo se admiten correos terminados en <b>@eafit.edu.co</b></span>
           ${fieldErrorHtml('Correo')}
         </label>
         <label class="pmi-field">
@@ -348,13 +350,28 @@ export async function renderLogin(root) {
   async function onLoginSubmit(e) {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const email = String(fd.get('Correo') || '').trim();
+    const pass = String(fd.get('Contrasena') || '');
     const slot = root.querySelector('#pmi-auth-form');
-    slot.innerHTML = loginFormHtml(null, true);
+
+    if (!email) {
+      slot.innerHTML = loginFormHtml('Ingresa tu correo institucional.', false, email);
+      slot.querySelector('#pmi-login-form').addEventListener('submit', onLoginSubmit);
+      return;
+    }
+
+    if (!isEafitEmail(email)) {
+      slot.innerHTML = loginFormHtml('Solo se admiten correos institucionales terminados en @eafit.edu.co.', false, email);
+      slot.querySelector('#pmi-login-form').addEventListener('submit', onLoginSubmit);
+      return;
+    }
+
+    slot.innerHTML = loginFormHtml(null, true, email);
     try {
-      await store.auth.login(String(fd.get('Correo') || '').trim(), String(fd.get('Contrasena') || ''));
+      await store.auth.login(email, pass);
       navigate('/');
     } catch (err) {
-      slot.innerHTML = loginFormHtml(err.message || 'No se pudo iniciar sesion.', false);
+      slot.innerHTML = loginFormHtml(err.message || 'No se pudo iniciar sesión.', false, email);
       slot.querySelector('#pmi-login-form').addEventListener('submit', onLoginSubmit);
     }
   }

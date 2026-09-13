@@ -14,7 +14,39 @@ class PMI_Rest_Recursos
 {
     const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // igual al limite de multer original
 
-    private static $select_fields = 'id_recurso, nombre, ubicacion, estado, dia_compra, tipo, cantidad_total, cantidad_disponible, activo';
+    /**
+     * Formatos de imagen aceptados. Deliberadamente sin SVG: el endpoint de
+     * imagen devuelve los bytes crudos en el origen del sitio, y un SVG puede
+     * contener JavaScript.
+     */
+    const ALLOWED_IMAGE_TYPES = array('image/jpeg', 'image/png', 'image/gif', 'image/webp');
+
+    /** Archivos temporales creados por maybe_parse_multipart_put() en esta request. */
+    private static $temp_files = array();
+
+    /**
+     * Columnas de recurso que se devuelven al cliente: excluye la imagen
+     * (LONGBLOB), que no es serializable a JSON y se sirve por su propio
+     * endpoint. Publica porque las busquedas de PMI_Rest_Busqueda leen las
+     * mismas columnas.
+     */
+    public static $select_fields = 'id_recurso, nombre, ubicacion, estado, dia_compra, tipo, cantidad_total, cantidad_disponible, activo';
+
+    /**
+     * Borra los temporales del parseo manual de multipart al terminar la
+     * request. Publico solo porque lo invoca register_shutdown_function().
+     *
+     * @return void
+     */
+    public static function cleanup_temp_files()
+    {
+        foreach (self::$temp_files as $path) {
+            if (is_file($path)) {
+                @unlink($path);
+            }
+        }
+        self::$temp_files = array();
+    }
 
     /**
      * Registra las rutas CRUD de recursos (inventario) y la ruta de imagen
@@ -85,12 +117,20 @@ class PMI_Rest_Recursos
     public static function get_resource(WP_REST_Request $request)
     {
         global $wpdb;
-        $id = $request->get_param('id');
+        $id = urldecode($request->get_param('id'));
 
         $row = $wpdb->get_row(
             $wpdb->prepare('SELECT ' . self::$select_fields . ' FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $id),
             ARRAY_A
         );
+
+        if (!$row) {
+            $raw_id = $request->get_param('id');
+            $row = $wpdb->get_row(
+                $wpdb->prepare('SELECT ' . self::$select_fields . ' FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $raw_id),
+                ARRAY_A
+            );
+        }
 
         if (!$row) {
             return new WP_Error('pmi_not_found', 'Recurso no encontrado', array('status' => 404));
@@ -119,10 +159,10 @@ class PMI_Rest_Recursos
             return;
         }
 
-        if (!preg_match('/boundary=(.*)$/i', $content_type, $matches)) {
+        if (!preg_match('/boundary=([^;\s]+)/i', $content_type, $matches)) {
             return;
         }
-        $boundary = trim($matches[1], '"');
+        $boundary = trim($matches[1], '"\'');
 
         $raw = $request->get_body();
         if (!$raw) {
@@ -135,12 +175,19 @@ class PMI_Rest_Recursos
 
         foreach ($blocks as $block) {
             $block = ltrim($block, "\r\n");
-            if ($block === '' || $block === '--' || strpos($block, "\r\n\r\n") === false) {
+            if ($block === '' || $block === '--') {
                 continue;
             }
 
-            list($headers, $content) = explode("\r\n\r\n", $block, 2);
-            $content = preg_replace('/\r\n$/', '', $content);
+            if (strpos($block, "\r\n\r\n") !== false) {
+                list($headers, $content) = explode("\r\n\r\n", $block, 2);
+                $content = preg_replace('/\r\n$/', '', $content);
+            } elseif (strpos($block, "\n\n") !== false) {
+                list($headers, $content) = explode("\n\n", $block, 2);
+                $content = preg_replace('/\n$/', '', $content);
+            } else {
+                continue;
+            }
 
             if (!preg_match('/name="([^"]+)"/', $headers, $name_match)) {
                 continue;
@@ -151,6 +198,14 @@ class PMI_Rest_Recursos
                 preg_match('/Content-Type:\s*([^\r\n]+)/i', $headers, $type_match);
                 $tmp_path = tempnam(sys_get_temp_dir(), 'pmi');
                 file_put_contents($tmp_path, $content);
+
+                // A diferencia de los archivos que sube PHP por si mismo,
+                // estos los creamos nosotros y nadie los limpia: sin esto la
+                // carpeta temporal del servidor crece con cada edicion.
+                if (empty(self::$temp_files)) {
+                    register_shutdown_function(array(__CLASS__, 'cleanup_temp_files'));
+                }
+                self::$temp_files[] = $tmp_path;
 
                 $files[$name] = array(
                     'name' => $filename_match[1],
@@ -193,9 +248,13 @@ class PMI_Rest_Recursos
             return new WP_Error('pmi_bad_request', 'La imagen supera el tamano maximo permitido (5MB)', array('status' => 400));
         }
 
+        // Lista blanca en vez de aceptar cualquier "image/*": image/svg+xml
+        // tambien empieza por "image/", y estos bytes se sirven despues tal
+        // cual desde GET /resources/{id}/imagen, en el mismo origen del sitio.
+        // Un SVG con <script> seria XSS almacenado con la sesion de WordPress.
         $mime = mime_content_type($file['tmp_name']);
-        if (strpos($mime, 'image/') !== 0) {
-            return new WP_Error('pmi_bad_request', 'Solo se permiten imagenes', array('status' => 400));
+        if (!in_array($mime, self::ALLOWED_IMAGE_TYPES, true)) {
+            return new WP_Error('pmi_bad_request', 'Formato de imagen no permitido: usa JPG, PNG, GIF o WebP', array('status' => 400));
         }
 
         $bytes = file_get_contents($file['tmp_name']);
@@ -230,30 +289,36 @@ class PMI_Rest_Recursos
             return new WP_Error('pmi_conflict', 'El recurso ya existe', array('status' => 409));
         }
 
+        $estado = sanitize_textarea_field($body['Estado'] ?? 'Disponible');
         $cantidad_total = isset($body['Cantidad_total']) ? (int) $body['Cantidad_total'] : null;
-        $cantidad_disponible = isset($body['Cantidad_disponible']) ? (int) $body['Cantidad_disponible'] : $cantidad_total;
 
-        // $wpdb->insert() maneja NULL correctamente para columnas nullable
-        // (dia_compra, cantidad_total, imagen...); $wpdb->query($wpdb->prepare())
-        // con %s/%d crudo NO lo hace de forma confiable (guarda '' o
-        // '0000-00-00' en vez de NULL segun la version de WordPress).
-        $wpdb->insert(
+        // cantidad_disponible es un valor derivado de los estados por unidad,
+        // no un dato que el formulario pueda contradecir (ver PMI_Inventario).
+        $cantidad_disponible = PMI_Inventario::disponibles(array('id_recurso' => $id, 'estado' => $estado));
+
+        $wpdb->hide_errors();
+        $inserted = $wpdb->insert(
             PMI_DB::recurso(),
             array(
                 'id_recurso' => $id,
                 'nombre' => sanitize_text_field($body['Nombre'] ?? ''),
                 'ubicacion' => sanitize_text_field($body['Ubicacion'] ?? ''),
-                'estado' => sanitize_text_field($body['Estado'] ?? 'Disponible'),
+                'estado' => $estado,
                 'dia_compra' => !empty($body['Dia_compra']) ? sanitize_text_field($body['Dia_compra']) : null,
                 'tipo' => sanitize_text_field($body['Tipo'] ?? ''),
                 'cantidad_total' => $cantidad_total,
                 'cantidad_disponible' => $cantidad_disponible,
-                'activo' => sanitize_text_field($body['activo'] ?? 'N/A'),
+                'activo' => sanitize_textarea_field($body['activo'] ?? 'N/A'),
                 'imagen' => $imagen,
                 'imagen_tipo' => $imagen_tipo,
             ),
             array('%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s')
         );
+        $wpdb->show_errors();
+
+        if ($wpdb->last_error || !$inserted) {
+            return new WP_Error('pmi_db_error', 'No se pudo crear el recurso en base de datos: ' . ($wpdb->last_error ?: 'Error desconocido'), array('status' => 500));
+        }
 
         return rest_ensure_response(array('message' => 'Recurso creado', 'idRecurso' => $id));
     }
@@ -270,12 +335,18 @@ class PMI_Rest_Recursos
     {
         global $wpdb;
         self::maybe_parse_multipart_put($request);
-        $id = $request->get_param('id');
+        $id = urldecode($request->get_param('id'));
         $body = $request->get_body_params();
 
         $current = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $id), ARRAY_A);
         if (!$current) {
-            return new WP_Error('pmi_not_found', 'Recurso no encontrado', array('status' => 404));
+            $raw_id = $request->get_param('id');
+            $current = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $raw_id), ARRAY_A);
+            if ($current) {
+                $id = $raw_id;
+            } else {
+                return new WP_Error('pmi_not_found', 'Recurso no encontrado', array('status' => 404));
+            }
         }
 
         $image = self::extract_image($request);
@@ -284,17 +355,20 @@ class PMI_Rest_Recursos
         }
         list($imagen, $imagen_tipo) = $image;
 
-        $cantidad_disponible = array_key_exists('Cantidad_disponible', $body) ? (int) $body['Cantidad_disponible'] : $current['cantidad_disponible'];
-        $activo = array_key_exists('activo', $body) ? sanitize_text_field($body['activo']) : ($current['activo'] ?? 'N/A');
+        $activo = array_key_exists('activo', $body) ? sanitize_textarea_field($body['activo']) : ($current['activo'] ?? 'N/A');
+        $estado = sanitize_textarea_field($body['Estado'] ?? $current['estado']);
+        $new_id = !empty($body['idRecurso']) ? sanitize_textarea_field($body['idRecurso']) : $id;
 
         $data = array(
             'nombre' => sanitize_text_field($body['Nombre'] ?? $current['nombre']),
             'ubicacion' => sanitize_text_field($body['Ubicacion'] ?? $current['ubicacion']),
-            'estado' => sanitize_text_field($body['Estado'] ?? $current['estado']),
+            'estado' => $estado,
             'dia_compra' => !empty($body['Dia_compra']) ? sanitize_text_field($body['Dia_compra']) : $current['dia_compra'],
             'tipo' => sanitize_text_field($body['Tipo'] ?? $current['tipo']),
             'cantidad_total' => array_key_exists('Cantidad_total', $body) ? (int) $body['Cantidad_total'] : $current['cantidad_total'],
-            'cantidad_disponible' => $cantidad_disponible,
+            // Derivado de los estados por unidad, no de lo que mande el
+            // formulario (ver PMI_Inventario).
+            'cantidad_disponible' => PMI_Inventario::disponibles(array('id_recurso' => $new_id, 'estado' => $estado)),
             'activo' => $activo,
         );
         $formats = array('%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s');
@@ -306,9 +380,21 @@ class PMI_Rest_Recursos
             $formats[] = '%s';
         }
 
-        $wpdb->update(PMI_DB::recurso(), $data, array('id_recurso' => $id), $formats, array('%s'));
+        if ($new_id !== $id) {
+            $data['id_recurso'] = $new_id;
+            $formats[] = '%s';
+            $wpdb->update(PMI_DB::detalle_prestamo(), array('recurso_id' => $new_id), array('recurso_id' => $id), array('%s'), array('%s'));
+        }
 
-        return rest_ensure_response(array('message' => 'Recurso Actualizado'));
+        $wpdb->hide_errors();
+        $updated = $wpdb->update(PMI_DB::recurso(), $data, array('id_recurso' => $id), $formats, array('%s'));
+        $wpdb->show_errors();
+
+        if ($wpdb->last_error) {
+            return new WP_Error('pmi_db_error', 'No se pudo actualizar el recurso: ' . $wpdb->last_error, array('status' => 500));
+        }
+
+        return rest_ensure_response(array('message' => 'Recurso Actualizado', 'idRecurso' => $new_id));
     }
 
     /**
@@ -321,21 +407,43 @@ class PMI_Rest_Recursos
     public static function delete_resource(WP_REST_Request $request)
     {
         global $wpdb;
-        $id = $request->get_param('id');
+        $id = urldecode($request->get_param('id'));
 
-        $wpdb->hide_errors();
-        $deleted = $wpdb->delete(PMI_DB::recurso(), array('id_recurso' => $id), array('%s'));
-        $wpdb->show_errors();
-
-        if ($wpdb->last_error) {
-            return new WP_Error('pmi_conflict', 'No se puede eliminar el recurso porque esta asociado a uno o mas prestamos', array('status' => 409));
+        $row = $wpdb->get_row($wpdb->prepare('SELECT id_recurso FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $id), ARRAY_A);
+        if (!$row) {
+            $raw_id = $request->get_param('id');
+            $row = $wpdb->get_row($wpdb->prepare('SELECT id_recurso FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $raw_id), ARRAY_A);
+            if ($row) {
+                $id = $raw_id;
+            } else {
+                return new WP_Error('pmi_not_found', 'Recurso no encontrado', array('status' => 404));
+            }
         }
+
+        // Un recurso que aparece en algun prestamo NO se puede borrar: borrar
+        // sus detalles en cascada (como se hacia antes para esquivar el error
+        // de llave foranea) destruye el historial de que se presto, a quien y
+        // cuando, incluso de prestamos ya cerrados.
+        $en_uso = (int) $wpdb->get_var($wpdb->prepare(
+            'SELECT COUNT(*) FROM ' . PMI_DB::detalle_prestamo() . ' WHERE recurso_id = %s',
+            $id
+        ));
+
+        if ($en_uso > 0) {
+            return new WP_Error(
+                'pmi_conflict',
+                'No se puede eliminar el recurso porque aparece en ' . $en_uso . ' prestamo(s). Su historial debe conservarse.',
+                array('status' => 409)
+            );
+        }
+
+        $deleted = $wpdb->delete(PMI_DB::recurso(), array('id_recurso' => $id), array('%s'));
 
         if (!$deleted) {
-            return new WP_Error('pmi_not_found', 'Recurso no encontrado', array('status' => 404));
+            return new WP_Error('pmi_delete_error', 'No se pudo eliminar el recurso', array('status' => 500));
         }
 
-        return rest_ensure_response(array('message' => 'Recurso eliminado'));
+        return rest_ensure_response(array('message' => 'Recurso eliminado correctamente'));
     }
 
     /**
@@ -350,23 +458,42 @@ class PMI_Rest_Recursos
     public static function get_resource_image(WP_REST_Request $request)
     {
         global $wpdb;
-        $id = $request->get_param('id');
+        $id = urldecode($request->get_param('id'));
 
         $row = $wpdb->get_row(
             $wpdb->prepare('SELECT imagen, imagen_tipo FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $id),
             ARRAY_A
         );
 
+        if (!$row) {
+            $raw_id = $request->get_param('id');
+            $row = $wpdb->get_row(
+                $wpdb->prepare('SELECT imagen, imagen_tipo FROM ' . PMI_DB::recurso() . ' WHERE id_recurso = %s', $raw_id),
+                ARRAY_A
+            );
+        }
+
         if (!$row || !$row['imagen']) {
             return new WP_Error('pmi_not_found', 'Imagen no encontrada', array('status' => 404));
         }
+
+        // El tipo guardado se acota a la lista blanca de subida: si una fila
+        // vieja o importada a mano trae otra cosa, se sirve como binario
+        // generico en vez de dejar que el navegador lo interprete.
+        $tipo = in_array($row['imagen_tipo'], self::ALLOWED_IMAGE_TYPES, true)
+            ? $row['imagen_tipo']
+            : 'application/octet-stream';
 
         // WP_REST_Response siempre serializa $data como JSON, asi que para
         // servir bytes crudos escribimos la respuesta directamente y
         // detenemos la ejecucion de WordPress aqui.
         status_header(200);
-        header('Content-Type: ' . $row['imagen_tipo']);
+        header('Content-Type: ' . $tipo);
         header('Content-Length: ' . strlen($row['imagen']));
+        // Sin nosniff, un navegador puede ignorar el Content-Type y ejecutar
+        // el contenido como HTML/SVG en el origen del sitio.
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Disposition: inline');
         echo $row['imagen'];
         exit;
     }

@@ -18,7 +18,7 @@ app.js            Punto de entrada: arranca el router al cargar el DOM.
 router.js         Ruteo por hash + guards de rol + orquesta el ciclo de render.
 state.js          Estado global (store) con pubsub simple: auth, catalog, loans, users, ticket.
 api.js            Cliente fetch hacia /wp-json/pmi/v1/, con nonce automático en escrituras.
-dom.js            Helpers puros: escapeHtml, formato de fecha, navigate(), loaderHtml().
+dom.js            Helpers puros: escapeHtml, formato de fecha, todayISO(), navigate(), loaderHtml().
 components/
   topbar.js         Barra superior (logo, buscador, menú de usuario) — se re-renderiza en cada navegación.
   modal.js          Modal genérico (backdrop + panel), usado por las vistas de gestión (ops-catalogo, ops-usuarios).
@@ -54,11 +54,16 @@ reconciliación de DOM (cada vista hace `root.innerHTML = ...` completo).
 
 | Sub-store | Qué guarda | Métodos clave |
 |---|---|---|
-| `auth` | Usuario actual (`user`, persistido en `sessionStorage['medialab_user']`), getters `isAuthed`/`isWorker` | `login()`, `register()`, `logout()` |
+| `auth` | Usuario actual (`user`, persistido en `sessionStorage['medialab_user']`), getters `isAuthed`/`isWorker`/`isTeacher`/`isStudent` | `login()`, `register()`, `logout()` |
 | `catalog` | `recursos[]` (normalizados desde la respuesta de la API) | `reload()`, `getById(id)` |
-| `loans` | `prestamos[]` + `detailsMap` (id de préstamo → lista de "Nombre ×cantidad" para mostrar en las tablas sin pedir el detalle completo) | `reload()`, `reloadDetails()`, `getPrestamo(id)`, `getLoanDetailItems(id)`, `crearPrestamo()`, `marcarEntregado()` |
+| `loans` | `prestamos[]`, `detailsMap` (id de préstamo → lista de "Nombre ×cantidad" para mostrar en las tablas sin pedir el detalle completo) y `detailsObjectsMap` (las mismas filas crudas, para filtros y para leer `unidades`) | `reload()`, `reloadDetails()`, `getPrestamo(id)`, `getLoanDetailItems(id)`, `crearPrestamo()`, `marcarEntregado()`, `marcarDevuelto()` |
 | `users` | `usuarios[]` | `reload()`, `getByCorreo(correo)` |
-| `ticket` | Borrador de la solicitud en curso (wizard de 3 pasos): recursos seleccionados, cantidades, fecha/hora, responsable, checkboxes de aceptación | `toggleSelectedId()`, `setQuantity()`, `removeSelected()`, `setFechaPrestamo()`, `setHoraPrestamo()`, `setNotas()`, `setAcceptCampusRule()`, `setAcceptTerms()`, `setResponsable()`, `clear()` |
+| `ticket` | Borrador de la solicitud en curso (wizard de 3 pasos): recursos seleccionados, cantidades, fecha/hora, contacto, fecha de devolución esperada, responsable, checkboxes de aceptación | `toggleSelectedId()`, `setQuantity()`, `removeSelected()`, `setFechaPrestamo()`, `setHoraPrestamo()`, `setNotas()`, `setContacto()`, `setFechaDevolucion()`, `setEsIndefinido()`, `setAcceptCampusRule()`, `setAcceptTerms()`, `setResponsable()`, `clear()` |
+
+`logout()` no solo borra el usuario: vacía también el catálogo, los
+préstamos, los dos mapas de detalles, los usuarios y el borrador del
+ticket. Sin eso, el siguiente usuario que entrara en el mismo navegador veía
+la selección de recursos y el teléfono de contacto de la persona anterior.
 
 Todas las respuestas de la API llegan en `snake_case` desde PHP
 (`correo`, `id_recurso`, `fecha_prestamo`...); cada `reload()` pasa los
@@ -66,6 +71,45 @@ datos por una función `normalizeXxx()` que los traduce a las llaves
 `PascalCase`/mixtas que usa el resto de la UI (`Correo`, `idRecurso`,
 `Fecha_prestamo`...). Esa normalización es el único lugar donde el
 frontend conoce la forma cruda de la respuesta del backend.
+
+### El estado de un préstamo se calcula en un solo lugar
+
+`state.js` exporta `loanEstado(prestamo)`, que devuelve
+`'pendiente' | 'afuera' | 'devuelto'`, y `LOAN_ESTADO_LABEL` con la etiqueta
+legible de cada uno. Las vistas usan esas dos cosas en lugar de ramificar
+sobre `Entregado`.
+
+La razón es que el ciclo de vida tiene tres estados y no dos:
+`Entregado` significa que el equipo salió hacia el solicitante y sigue fuera
+del inventario, y `Devuelto` que volvió al laboratorio. Cada pantalla que
+decidía por su cuenta qué mostrar a partir de `Entregado` acababa contando
+una historia distinta ("entregado" leído como "cerrado", por ejemplo), así
+que la traducción de columnas a estado vive en una sola función.
+
+Del lado de las acciones hay un método por hito:
+`store.loans.marcarEntregado(id)` y `store.loans.marcarDevuelto(id)`, ambos
+recargan préstamos y catálogo, porque el segundo cambia la disponibilidad.
+
+Las tres vistas del trabajador (`ops-dashboard.js`, `ops-solicitudes.js` y
+`ops-ticket.js`) exponen **una acción por estado**, nunca las dos en el mismo
+botón: "Pendientes de entrega" ofrece `marcarEntregado()` y "Pendientes de
+devolución" (equipos fuera del laboratorio) ofrece `marcarDevuelto()`. Un
+botón que hiciera las dos cosas a la vez —entregar y liberar el stock en el
+mismo clic— volvería a dejar el equipo reservable mientras sigue en manos del
+solicitante, que es justo lo que separa el ciclo de tres estados.
+`scratch/smoke-ops-views.mjs` comprueba esa separación montando las vistas con
+un préstamo en cada estado.
+
+`crearPrestamo()` manda los recursos dentro de la misma llamada de creación
+(`POST /loans` con `recursos`). Antes eran dos peticiones y, si fallaba la
+segunda, quedaba un préstamo vacío que el estudiante no podía borrar y que
+le bloqueaba cualquier solicitud nueva.
+
+Las vistas que necesitan saber qué unidad física tiene un préstamo
+(`detalle-pedido.js`, `ops-ticket.js`, `ops-catalogo.js`) leen el campo
+`unidades` que trae cada detalle. Antes lo adivinaban comparando subcadenas
+de los textos que se muestran en pantalla, un heurístico que se equivocaba
+en cuanto dos grupos compartían nombre.
 
 ## `api.js`: cliente REST
 
@@ -110,7 +154,11 @@ rutas del servidor).
      fue baneado o le cambiaron el rol desde `wp-admin` mientras la
      sesión seguía abierta (`sessionStorage` por sí solo quedaría
      desactualizado). Si cambió algo, actualiza el store y
-     `sessionStorage`.
+     `sessionStorage`. Si esa consulta responde `401`, la sesión del
+     servidor ya no vale (expiró a las 24h, o cambió la contraseña): cierra
+     sesión y redirige a `/login`, en vez de dejar a la persona navegando
+     pantallas vacías sin entender por qué. Cualquier otro error (red, 500)
+     no la saca de la app.
    - Si `Baneado === 1`, muestra una pantalla de cuenta suspendida en vez
      de la ruta pedida (con opción de cerrar sesión), sin importar qué
      guard tenía la ruta.
@@ -190,14 +238,23 @@ export async function renderMisPrestamos(root) {
   formulario de registro (por campo, con reglas de país/celular), y una
   secuencia de mensajes rotando en un loader de éxito tras registrarse.
 - **`nueva-solicitud.js`**: wizard de 3 pasos (recursos → día/hora →
-  confirmación) con validación por paso y reglas de negocio hardcodeadas
-  en el cliente (horario 08:00–18:00, solo día actual, solo días hábiles)
-  — son un espejo de lo que igualmente valida/permite el backend, no un
-  reemplazo de esa validación.
+  confirmación) con validación por paso y reglas de negocio escritas en el
+  cliente (horario 08:00–18:00, solo día actual, solo días hábiles; un
+  Docente puede elegir otra fecha y pedir el préstamo indefinido) — son un
+  espejo de lo que valida el backend en `POST /loans`, no un reemplazo de
+  esa validación: una petición armada a mano se topa con las mismas reglas.
+  El "hoy" con el que compara sale de `todayISO()`; usar
+  `toISOString().slice(0,10)` calculaba la fecha en UTC, así que pasadas las
+  19:00 de Bogotá ya era el día siguiente para el navegador y las pantallas
+  filtradas por fecha se veían vacías el resto de la noche.
 - **`catalogo.js`** y **`ops-catalogo.js`** / **`ops-usuarios.js`**: usan
   `components/modal.js` para el detalle de recurso y los formularios de
   alta/edición/baja (CRUD completo desde modales, sin navegar a otra
-  ruta).
+  ruta). Las dos vistas de catálogo descomponen cada recurso en sus
+  unidades físicas (`idRecurso` es la lista autoritativa de unidades y
+  `Estado` la lista paralela de estados) para mostrar el desglose de
+  disponibles / en uso / no disponibles, y toleran las filas que traen un
+  único estado para todo el grupo.
 
 ## CSS (`assets/css/app.css`)
 

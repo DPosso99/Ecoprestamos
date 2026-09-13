@@ -8,8 +8,9 @@ if (!defined('ABSPATH')) {
  *  1. Tablas base via dbDelta() (sql/001-tables.sql).
  *  2. Restricciones FOREIGN KEY via $wpdb->query() (sql/003-constraints.sql),
  *     porque dbDelta() no soporta FOREIGN KEY.
- *  3. Triggers de inventario via $wpdb->query() (sql/002-triggers.sql),
- *     replicando la logica que en el proyecto original vivia en MySQL.
+ *  3. Trigger de guarda del inventario via $wpdb->query() (sql/002-triggers.sql).
+ *     El ajuste de inventario lo hace PHP (PMI_Inventario); el trigger solo
+ *     valida escrituras que no pasen por la API REST.
  *
  * Si el usuario de base de datos no tiene privilegios para CREATE TRIGGER o
  * para agregar FOREIGN KEY (comun en algunos hostings compartidos), el fallo
@@ -18,7 +19,15 @@ if (!defined('ABSPATH')) {
 class PMI_Activator
 {
     const DB_VERSION_OPTION = 'pmi_db_version';
-    const DB_VERSION = '1.0.0';
+
+    /**
+     * Version del esquema. HAY QUE SUBIRLA con cada cambio en sql/001-tables.sql:
+     * el plugin solo vuelve a aplicar el esquema cuando este numero no coincide
+     * con el guardado en la base (ver el hook de plugins_loaded en
+     * ecoprestamos-plugin.php). Si se agrega una columna sin subirla, las
+     * instalaciones existentes se quedan sin esa columna.
+     */
+    const DB_VERSION = '1.2.0';
     const NOTICES_OPTION = 'pmi_activation_notices';
 
     /**
@@ -84,7 +93,13 @@ class PMI_Activator
      */
     private static function create_tables()
     {
-        $sql = self::read_sql_file('001-tables.sql');
+        // Hay que quitar los comentarios antes de pasarle el SQL a dbDelta():
+        // su parser recorre el archivo linea por linea y toma cada linea de
+        // comentario como si fuera la definicion de una columna, generando
+        // sentencias imposibles del tipo "ALTER TABLE ... ADD COLUMN -- texto"
+        // que quedan como errores de SQL en el log en cada actualizacion de
+        // esquema (y podrian tapar un error real).
+        $sql = self::strip_comment_lines(self::read_sql_file('001-tables.sql'));
 
         $previous_level = error_reporting();
         error_reporting($previous_level & ~E_WARNING);
@@ -141,12 +156,27 @@ class PMI_Activator
         $sql = self::strip_comment_lines(self::read_sql_file('003-constraints.sql'));
         $statements = array_filter(array_map('trim', explode(';', $sql)));
 
+        // Las restricciones que ya existen se saltan en vez de intentarlas y
+        // descartar el error: reintentarlas dejaba cuatro "Duplicate foreign
+        // key constraint name" en el log de WordPress en cada arranque que
+        // aplicara el esquema, y ese ruido puede tapar un error de verdad.
+        $existentes = $wpdb->get_col($wpdb->prepare(
+            'SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+             WHERE CONSTRAINT_SCHEMA = %s AND CONSTRAINT_TYPE = %s',
+            DB_NAME,
+            'FOREIGN KEY'
+        ));
+
         foreach ($statements as $statement) {
             if ($statement === '') {
                 continue;
             }
 
-            // Evita error si el plugin se reactiva y la restriccion ya existe.
+            if (preg_match('/ADD CONSTRAINT\s+(\S+)/i', $statement, $m)
+                && in_array(trim($m[1], '`'), (array) $existentes, true)) {
+                continue;
+            }
+
             $wpdb->hide_errors();
             $wpdb->query($statement);
             $wpdb->show_errors();
@@ -177,16 +207,24 @@ class PMI_Activator
         $sql = self::strip_comment_lines(self::read_sql_file('002-triggers.sql'), $marker);
         $blocks = explode($marker, $sql);
 
-        $trigger_names = array('pmi_after_detalle_insert', 'pmi_after_prestamo_cierre');
+        $prefix = PMI_DB::prefix();
+        $drop_triggers = array(
+            $prefix . 'before_detalle_insert',
+            $prefix . 'after_detalle_insert',
+            $prefix . 'after_prestamo_cierre',
+            'pmi_before_detalle_insert',
+            'pmi_after_detalle_insert',
+            'pmi_after_prestamo_cierre',
+        );
+
+        foreach ($drop_triggers as $tname) {
+            $wpdb->query('DROP TRIGGER IF EXISTS ' . $tname);
+        }
 
         foreach ($blocks as $index => $block) {
             $block = trim($block);
             if ($block === '') {
                 continue;
-            }
-
-            if (isset($trigger_names[$index])) {
-                $wpdb->query('DROP TRIGGER IF EXISTS ' . $trigger_names[$index]);
             }
 
             $wpdb->hide_errors();
@@ -195,8 +233,8 @@ class PMI_Activator
 
             if ($wpdb->last_error) {
                 $notices[] = sprintf(
-                    'PMI: no se pudo crear el trigger de inventario "%s" (%s). El usuario de la base de datos probablemente no tiene el privilegio TRIGGER. La app seguira funcionando, pero las cantidades de recurso NO se ajustaran automaticamente al prestar/devolver: revisa los permisos de tu base de datos MySQL.',
-                    isset($trigger_names[$index]) ? $trigger_names[$index] : ('#' . $index),
+                    'PMI: no se pudo crear el trigger de guarda del inventario #%d (%s). El usuario de la base de datos probablemente no tiene el privilegio TRIGGER. La app sigue funcionando y ajustando el inventario con normalidad (eso lo hace PHP, no el trigger); lo que se pierde es la validacion extra para escrituras hechas por fuera de la aplicacion, como importaciones de SQL o cambios desde phpMyAdmin.',
+                    $index + 1,
                     $wpdb->last_error
                 );
             }

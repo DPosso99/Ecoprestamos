@@ -23,6 +23,7 @@ export async function renderOpsUsuarios(root) {
     const nq = norm(q);
     let items = !nq ? store.users.usuarios : store.users.usuarios.filter((u) => norm(`${u.Nombre} ${u.Correo} ${u.Rol} ${u.numero}`).includes(nq));
     if (filterMode === 'estudiantes') items = items.filter((u) => u.Rol === 'Estudiante');
+    if (filterMode === 'docentes') items = items.filter((u) => u.Rol === 'Docente');
     if (filterMode === 'trabajadores') items = items.filter((u) => u.Rol === 'Trabajador');
     if (filterMode === 'baneados') items = items.filter((u) => u.Baneado === 1);
     return items;
@@ -35,22 +36,22 @@ export async function renderOpsUsuarios(root) {
   function itemHtml(u) {
     const isMe = u.Correo === store.auth.user?.Correo;
     return `
-      <div class="ui-card-inner pmi-p-4 pmi-flex pmi-justify-between pmi-items-start pmi-gap-4">
-        <div class="pmi-min-w-0">
+      <div class="ui-card-inner pmi-p-4 pmi-user-item pmi-flex pmi-justify-between pmi-items-center pmi-gap-4">
+        <div class="pmi-min-w-0" style="flex:1;">
           <div class="pmi-flex pmi-items-center pmi-gap-2 pmi-wrap">
             <div class="pmi-title pmi-truncate">${escapeHtml(u.Nombre)}</div>
             ${isMe ? '<span class="ui-chip ui-chip-on" style="padding:2px 8px;">Tu</span>' : ''}
-            <span class="ui-chip ui-chip-off" style="padding:2px 8px;">${u.Rol === 'Trabajador' ? (u.Trabajo || 'Trabajador') : 'Estudiante'}</span>
+            <span class="ui-chip ui-chip-off" style="padding:2px 8px;">${u.Rol === 'Trabajador' ? escapeHtml(u.Trabajo || 'Trabajador') : (u.Rol === 'Docente' ? 'Docente' : 'Estudiante')}</span>
             ${u.Baneado === 1 ? '<span class="pmi-pill pmi-pill-danger" style="height:auto;padding:2px 8px;">Baneado</span>' : ''}
           </div>
           <div class="pmi-text-sm pmi-muted pmi-truncate" style="margin-top:4px;">${escapeHtml(u.Correo)}</div>
           ${u.numero ? `<div class="pmi-text-xs pmi-muted" style="margin-top:2px;">${escapeHtml(u.numero)}</div>` : ''}
         </div>
         ${!isMe ? `
-          <div class="pmi-flex pmi-gap-2 pmi-wrap" style="flex-shrink:0;">
-            <button class="ui-btn ui-btn-ghost" data-edit="${escapeHtml(u.Correo)}">Editar</button>
-            ${u.Rol === 'Estudiante' ? `<button class="ui-btn ui-btn-ghost" data-ban="${escapeHtml(u.Correo)}">${u.Baneado === 1 ? 'Desbanear' : 'Banear'}</button>` : ''}
-            <button class="ui-btn ui-btn-danger" data-delete="${escapeHtml(u.Correo)}">Eliminar</button>
+          <div class="pmi-user-actions pmi-flex pmi-gap-2 pmi-wrap">
+            <button class="ui-btn ui-btn-ghost ui-btn-sm" data-edit="${escapeHtml(u.Correo)}">Editar</button>
+            ${u.Rol === 'Estudiante' || u.Rol === 'Docente' ? `<button class="ui-btn ui-btn-ghost ui-btn-sm" data-ban="${escapeHtml(u.Correo)}">${u.Baneado === 1 ? 'Desbanear' : 'Banear'}</button>` : ''}
+            <button class="ui-btn ui-btn-danger ui-btn-sm" data-delete="${escapeHtml(u.Correo)}">Eliminar</button>
           </div>
         ` : ''}
       </div>
@@ -60,23 +61,23 @@ export async function renderOpsUsuarios(root) {
   /** Renderiza la vista completa (buscador, filtros, lista) y engancha sus listeners. */
   function full() {
     const items = list();
-    const filters = [['todos', 'Todos'], ['estudiantes', 'Estudiantes'], ['trabajadores', 'Trabajadores'], ['baneados', 'Baneados']];
+    const filters = [['todos', 'Todos'], ['estudiantes', 'Estudiantes'], ['docentes', 'Docentes'], ['trabajadores', 'Trabajadores'], ['baneados', 'Baneados']];
 
     root.innerHTML = `
-      <div class="pmi-flex pmi-justify-between pmi-items-start pmi-gap-4" style="flex-wrap:wrap;">
+      <div class="pmi-admin-header pmi-flex pmi-justify-between pmi-items-start pmi-gap-4">
         <div>
-          <div class="pmi-h1">Administracion de usuarios</div>
-          <div class="pmi-text-sm pmi-muted" style="margin-top:6px;">Agregar, editar, banear y eliminar usuarios del sistema.</div>
+          <div class="pmi-h1">Administración de usuarios</div>
+          <div class="pmi-text-sm pmi-muted pmi-admin-subtitle">Agregar, editar, banear y eliminar usuarios del sistema.</div>
         </div>
-        <div class="pmi-flex pmi-gap-2">
+        <div class="pmi-admin-header-actions">
           <button class="ui-btn ui-btn-ghost" id="pmi-back">&larr; Volver</button>
           <button class="ui-btn ui-btn-primary" id="pmi-new">+ Nuevo usuario</button>
         </div>
       </div>
 
       <div class="ui-card pmi-p-6" style="margin-top:20px;">
-        <div class="pmi-flex pmi-items-center pmi-gap-3">
-          <input class="ui-input" id="pmi-search" placeholder="Buscar por nombre, correo, rol..." value="${escapeHtml(q)}" />
+        <div class="pmi-flex pmi-items-center pmi-gap-3" style="flex-wrap:wrap;">
+          <input class="ui-input" id="pmi-search" placeholder="Buscar por nombre, correo, rol..." value="${escapeHtml(q)}" style="flex:1;min-width:200px;" />
           <div class="pmi-text-sm pmi-muted" style="flex-shrink:0;">${items.length} usuarios</div>
         </div>
         <div class="pmi-flex pmi-gap-2 pmi-wrap" style="margin-top:12px;">
@@ -129,6 +130,7 @@ export async function renderOpsUsuarios(root) {
           <span class="pmi-label">Rol</span>
           <select class="ui-input" name="Rol" id="pmi-rol">
             <option value="Estudiante" ${editing?.Rol === 'Estudiante' ? 'selected' : ''}>Estudiante</option>
+            <option value="Docente" ${editing?.Rol === 'Docente' ? 'selected' : ''}>Docente</option>
             <option value="Trabajador" ${editing?.Rol === 'Trabajador' ? 'selected' : ''}>Trabajador</option>
           </select>
         </label>

@@ -113,7 +113,19 @@ async function refreshUserStatus() {
       store.auth.user = next;
       sessionStorage.setItem('medialab_user', JSON.stringify(next));
     }
-  } catch { /* si falla la consulta, no bloquear al usuario */ }
+  } catch (e) {
+    // Un 401 aqui significa que la sesion del servidor ya no vale (expiro a
+    // las 24h, o la contrasena cambio). Antes se ignoraba y el usuario se
+    // quedaba viendo pantallas vacias sin saber por que: hay que devolverlo
+    // al login. Cualquier otro error (red, 500) no debe sacarlo de la app.
+    if (e?.status === 401) {
+      await store.auth.logout();
+      dataLoaded = false;
+      window.location.hash = '/login';
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -167,7 +179,13 @@ async function render() {
   }
 
   // A partir de aqui todas las rutas requieren sesion.
-  if (!store.auth.isAuthed) { window.location.hash = '/login'; return; }
+  if (!store.auth.isAuthed) {
+    // Sin sesion, la precarga de datos tiene que volver a correr para el
+    // siguiente usuario que entre en este mismo navegador.
+    dataLoaded = false;
+    window.location.hash = '/login';
+    return;
+  }
 
   // Refresca Rol/Trabajo/Baneado desde el servidor ANTES de decidir nada
   // basado en el rol: si un administrador cambio el Rol de esta persona
@@ -179,7 +197,9 @@ async function render() {
   if (!dataLoaded) {
     root.innerHTML = loaderHtml('Cargando tu informacion...');
   }
-  await refreshUserStatus();
+  if (!await refreshUserStatus()) {
+    return;
+  }
 
   if (store.auth.user?.Baneado === 1) {
     root.innerHTML = `<div class="pmi-shell"><div id="pmi-topbar-slot"></div><main class="pmi-container pmi-main" id="pmi-main"></main></div>`;

@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: Medialab Prestamos
+ * Plugin Name: EcoPrestamos - Prestamos MediaLab
  * Description: Backend de registro de prestamos y manejo de inventario, migrado desde una app Node/Express+React a un plugin de WordPress con tablas SQL propias ($wpdb + dbDelta) y una API REST bajo /wp-json/pmi/v1/.
  * Version: 1.0.0
  * Author: EAFIT MediaLab
@@ -27,6 +27,7 @@ define('PMI_VERSION', '1.0.0');
 require_once PMI_PLUGIN_DIR . 'includes/class-pmi-error-log.php';
 require_once PMI_PLUGIN_DIR . 'includes/class-pmi-db.php';
 require_once PMI_PLUGIN_DIR . 'includes/class-pmi-utils.php';
+require_once PMI_PLUGIN_DIR . 'includes/class-pmi-inventario.php';
 require_once PMI_PLUGIN_DIR . 'includes/class-pmi-auth.php';
 require_once PMI_PLUGIN_DIR . 'includes/class-pmi-activator.php';
 require_once PMI_PLUGIN_DIR . 'includes/class-pmi-rest-usuarios.php';
@@ -40,6 +41,19 @@ PMI_Error_Log::register_fatal_handler();
 
 register_activation_hook(__FILE__, array('PMI_Activator', 'activate'));
 
+/**
+ * register_activation_hook() solo corre al activar el plugin desde el admin.
+ * Al actualizar los archivos en su lugar (subir una version nueva por FTP o
+ * por git) el esquema se queda en la version anterior y cualquier columna
+ * nueva provoca un error de SQL en cada request. Este chequeo aplica el
+ * esquema pendiente una sola vez por sitio, en cuanto cambia PMI_Activator::DB_VERSION.
+ */
+add_action('plugins_loaded', function () {
+    if (get_option(PMI_Activator::DB_VERSION_OPTION) !== PMI_Activator::DB_VERSION) {
+        PMI_Activator::activate();
+    }
+});
+
 new PMI_Admin();
 
 /**
@@ -49,16 +63,24 @@ new PMI_Admin();
  * cualquier request a la API REST de ese sitio falla con "Table doesn't
  * exist". Este hook cubre ese caso creando las tablas del subsitio nuevo.
  *
- * @param int $blog_id ID del subsitio recien creado.
+ * @param WP_Site $new_site Subsitio recien creado.
  */
-add_action('wpmu_new_blog', function ($blog_id) {
+add_action('wp_initialize_site', function ($new_site) {
+    // is_plugin_active_for_network() vive en wp-admin y no esta cargada
+    // cuando el sitio se crea por WP-CLI o por la REST API: sin este
+    // require, crear un subsitio por esos caminos termina en un fatal.
+    if (!function_exists('is_plugin_active_for_network')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
     if (!is_plugin_active_for_network(plugin_basename(PMI_PLUGIN_FILE))) {
         return;
     }
-    switch_to_blog($blog_id);
+
+    switch_to_blog($new_site->id);
     PMI_Activator::activate();
     restore_current_blog();
-});
+}, 20);
 
 /**
  * Registra todas las rutas REST del plugin bajo /wp-json/pmi/v1/ cuando

@@ -8,6 +8,62 @@ if (!defined('ABSPATH')) {
  */
 class PMI_Rest_Prestamos
 {
+    /** Horario de atencion del laboratorio, en minutos desde medianoche (08:00 a 18:00). */
+    const APERTURA_MINUTOS = 8 * 60;
+    const CIERRE_MINUTOS = 18 * 60;
+
+    /**
+     * Aplica las reglas de horario del laboratorio, que hasta ahora solo
+     * validaba el navegador (nueva-solicitud.js): una peticion armada a mano
+     * podia agendar un prestamo un domingo a las 3 de la manana.
+     *
+     * Se replican tal como las aplica la interfaz para cada rol:
+     *  - Trabajador: exento, para prestamos en mostrador y casos excepcionales.
+     *  - Docente: cualquier fecha (sus prestamos son de periodo largo), pero
+     *    dentro del horario de atencion.
+     *  - Estudiante: solo el mismo dia, de lunes a viernes y en horario.
+     *
+     * @param string|null $fecha_raw Fecha/hora del prestamo tal como llega del cliente.
+     * @return true|WP_Error
+     */
+    private static function validar_horario($fecha_raw)
+    {
+        if (PMI_Auth::is_worker()) {
+            return true;
+        }
+
+        $fecha = PMI_Utils::to_mysql_datetime($fecha_raw);
+        if (!$fecha) {
+            return new WP_Error('pmi_bad_request', 'La fecha del prestamo es obligatoria', array('status' => 400));
+        }
+
+        try {
+            $momento = new DateTime($fecha, wp_timezone());
+        } catch (Exception $e) {
+            return new WP_Error('pmi_bad_request', 'La fecha del prestamo no es valida', array('status' => 400));
+        }
+
+        $minutos = ((int) $momento->format('G') * 60) + (int) $momento->format('i');
+        if ($minutos < self::APERTURA_MINUTOS || $minutos > self::CIERRE_MINUTOS) {
+            return new WP_Error('pmi_bad_request', 'El horario de atencion es de 08:00 a 18:00', array('status' => 400));
+        }
+
+        $user = PMI_Auth::current_user();
+        if (($user['rol'] ?? '') === 'Docente') {
+            return true;
+        }
+
+        if ((int) $momento->format('N') >= 6) {
+            return new WP_Error('pmi_bad_request', 'Los prestamos solo aplican de lunes a viernes', array('status' => 400));
+        }
+
+        if ($momento->format('Y-m-d') !== current_time('Y-m-d')) {
+            return new WP_Error('pmi_bad_request', 'Los prestamos son unicamente para el mismo dia', array('status' => 400));
+        }
+
+        return true;
+    }
+
     /**
      * Registra las rutas CRUD de prestamos bajo /wp-json/pmi/v1/.
      *
@@ -34,10 +90,13 @@ class PMI_Rest_Prestamos
                 'callback' => array(__CLASS__, 'get_loan'),
                 'permission_callback' => array('PMI_Auth', 'permission_logged_in'),
             ),
+            // Registrar entrega y devolucion es trabajo del laboratorio. Con
+            // permission_logged_in, cualquier estudiante podia cerrar el
+            // prestamo de otra persona y liberar su inventario.
             array(
                 'methods' => 'PUT',
                 'callback' => array(__CLASS__, 'edit_loan'),
-                'permission_callback' => array('PMI_Auth', 'permission_logged_in'),
+                'permission_callback' => array('PMI_Auth', 'permission_worker'),
             ),
             array(
                 'methods' => 'DELETE',
@@ -55,7 +114,18 @@ class PMI_Rest_Prestamos
     public static function get_loans()
     {
         global $wpdb;
-        $rows = $wpdb->get_results('SELECT * FROM ' . PMI_DB::prestamo(), ARRAY_A);
+
+        if (PMI_Auth::is_worker()) {
+            $rows = $wpdb->get_results('SELECT * FROM ' . PMI_DB::prestamo(), ARRAY_A);
+        } else {
+            // Un solicitante solo ve sus propios prestamos: la lista completa
+            // expone correo, telefono y notas de todo el mundo.
+            $rows = $wpdb->get_results($wpdb->prepare(
+                'SELECT * FROM ' . PMI_DB::prestamo() . ' WHERE usuario_solicitante = %s',
+                PMI_Auth::correo()
+            ), ARRAY_A);
+        }
+
         return rest_ensure_response(self::map_rows($rows));
     }
 
@@ -75,6 +145,10 @@ class PMI_Rest_Prestamos
             return new WP_Error('pmi_not_found', 'Prestamo no encontrado', array('status' => 404));
         }
 
+        if (!PMI_Auth::is_worker() && !PMI_Auth::is_self($row['usuario_solicitante'])) {
+            return new WP_Error('pmi_forbidden', 'No puedes consultar la solicitud de otra persona', array('status' => 403));
+        }
+
         return rest_ensure_response(self::map_row($row));
     }
 
@@ -89,10 +163,16 @@ class PMI_Rest_Prestamos
     public static function create_loan(WP_REST_Request $request)
     {
         global $wpdb;
-        $body = $request->get_json_params();
+        $body = $request->get_json_params() ?: array();
 
         $usuario_solicitante = sanitize_email($body['usuario_solicitante'] ?? '');
         $usuario_responsable = sanitize_email($body['usuario_responsable'] ?? '');
+
+        // Cada persona solo puede pedir para si misma. Un Trabajador si puede
+        // registrar la solicitud a nombre de otro (prestamo en mostrador).
+        if (!PMI_Auth::is_worker()) {
+            $usuario_solicitante = PMI_Auth::correo();
+        }
 
         if (!$usuario_solicitante || !$usuario_responsable) {
             return new WP_Error('pmi_bad_request', 'usuario_solicitante y usuario_responsable son obligatorios', array('status' => 400));
@@ -104,11 +184,31 @@ class PMI_Rest_Prestamos
             return new WP_Error('pmi_bad_request', 'El usuario solicitante o responsable no existe', array('status' => 400));
         }
 
+        $horario = self::validar_horario($body['Fecha_prestamo'] ?? null);
+        if (is_wp_error($horario)) {
+            return $horario;
+        }
+
+        $fecha_devolucion_raw = $body['fecha_devolucion'] ?? $body['Fecha_devolucion'] ?? null;
+
+        // El prestamo indefinido es una figura para docentes (proyectos y
+        // semilleros); un estudiante no puede otorgarselo a si mismo.
+        $rol_actual = PMI_Auth::current_user()['rol'] ?? '';
+        $puede_indefinido = PMI_Auth::is_worker() || $rol_actual === 'Docente';
+        $es_indefinido = (!empty($body['es_indefinido']) && $puede_indefinido) ? 1 : 0;
+
+        // El prestamo y la reserva de sus unidades van en una sola
+        // transaccion: si la reserva falla no debe quedar un prestamo vacio.
+        // Antes eran dos peticiones separadas y, al fallar la segunda, el
+        // prestamo huerfano bloqueaba al solicitante ("ya tienes una solicitud
+        // activa") sin forma de borrarlo desde su propia cuenta.
+        $wpdb->query('START TRANSACTION');
+
         // $wpdb->insert() (a diferencia de $wpdb->prepare() con %s/%d crudo)
         // siempre ha insertado NULL real para valores PHP null, en cualquier
         // version de WordPress. No usar $wpdb->query($wpdb->prepare(...)) aqui:
         // con columnas nullable eso guarda '' o '0000-00-00' en vez de NULL.
-        $wpdb->insert(
+        $insertado = $wpdb->insert(
             PMI_DB::prestamo(),
             array(
                 'notas' => $body['Notas'] ?? null,
@@ -117,11 +217,32 @@ class PMI_Rest_Prestamos
                 'entregado' => !empty($body['Entregado']) ? 1 : 0,
                 'usuario_solicitante' => $usuario_solicitante,
                 'usuario_responsable' => $usuario_responsable,
+                'fecha_devolucion' => $fecha_devolucion_raw ? PMI_Utils::to_mysql_datetime($fecha_devolucion_raw) : null,
+                'es_indefinido' => $es_indefinido,
             ),
-            array('%s', '%s', '%s', '%d', '%s', '%s')
+            array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%d')
         );
 
-        return rest_ensure_response(array('message' => 'Prestamo solicitado', 'idPrestamo' => (int) $wpdb->insert_id));
+        $id_prestamo = (int) $wpdb->insert_id;
+
+        if ($insertado === false || !$id_prestamo) {
+            $wpdb->query('ROLLBACK');
+            return new WP_Error('pmi_server_error', 'No se pudo registrar la solicitud', array('status' => 500));
+        }
+
+        // Los recursos son opcionales: un Trabajador puede crear el prestamo
+        // vacio y agregarlos despues con POST /loans/{id}/details.
+        $recursos = $body['recursos'] ?? $body['recurso'] ?? array();
+        if (!empty($recursos)) {
+            $reserva = PMI_Rest_Detalles::reservar_recursos($id_prestamo, $recursos, $usuario_solicitante);
+            if (is_wp_error($reserva)) {
+                return PMI_Rest_Detalles::rollback($reserva, $id_prestamo);
+            }
+        }
+
+        $wpdb->query('COMMIT');
+
+        return rest_ensure_response(array('message' => 'Prestamo solicitado', 'idPrestamo' => $id_prestamo));
     }
 
     /**
@@ -137,7 +258,7 @@ class PMI_Rest_Prestamos
     {
         global $wpdb;
         $id = (int) $request->get_param('id');
-        $body = $request->get_json_params();
+        $body = $request->get_json_params() ?: array();
 
         $current = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . PMI_DB::prestamo() . ' WHERE id_prestamo = %d', $id), ARRAY_A);
         if (!$current) {
@@ -145,13 +266,35 @@ class PMI_Rest_Prestamos
         }
 
         $entregado = array_key_exists('Entregado', $body) ? (int) (bool) $body['Entregado'] : (int) $current['entregado'];
+        $devuelto = array_key_exists('Devuelto', $body) ? (int) (bool) $body['Devuelto'] : (int) ($current['devuelto'] ?? 0);
         $hora_entrega_raw = array_key_exists('Hora_entrega', $body) ? $body['Hora_entrega'] : $current['hora_entrega'];
+        $hora_devolucion_raw = array_key_exists('Hora_devolucion', $body) ? $body['Hora_devolucion'] : ($current['hora_devolucion'] ?? null);
+        $fecha_devolucion_raw = array_key_exists('fecha_devolucion', $body)
+            ? $body['fecha_devolucion']
+            : (array_key_exists('Fecha_devolucion', $body) ? $body['Fecha_devolucion'] : $current['fecha_devolucion']);
+        $es_indefinido = array_key_exists('es_indefinido', $body) ? (int) (bool) $body['es_indefinido'] : (int) ($current['es_indefinido'] ?? 0);
 
-        // Si se marca como entregado y no se envio hora, se usa la hora actual del sitio.
-        if ($entregado === 1 && (int) $current['entregado'] === 0 && empty($hora_entrega_raw)) {
+        $recien_entregado = ($entregado === 1 && (int) $current['entregado'] === 0);
+        $recien_devuelto = ($devuelto === 1 && (int) ($current['devuelto'] ?? 0) === 0);
+
+        // Un equipo que vuelve al laboratorio necesariamente habia salido: si
+        // se registra la devolucion sin haber marcado la entrega, se asume.
+        if ($recien_devuelto && $entregado === 0) {
+            $entregado = 1;
+            $recien_entregado = true;
+        }
+
+        // Si se marca un hito y no se envio la hora, se usa la hora actual del sitio.
+        if ($recien_entregado && empty($hora_entrega_raw)) {
             $hora_entrega = PMI_Utils::now_mysql_datetime();
         } else {
             $hora_entrega = PMI_Utils::to_mysql_datetime($hora_entrega_raw);
+        }
+
+        if ($recien_devuelto && empty($hora_devolucion_raw)) {
+            $hora_devolucion = PMI_Utils::now_mysql_datetime();
+        } else {
+            $hora_devolucion = PMI_Utils::to_mysql_datetime($hora_devolucion_raw);
         }
 
         $wpdb->update(
@@ -165,11 +308,23 @@ class PMI_Rest_Prestamos
                 'entregado' => $entregado,
                 'usuario_solicitante' => array_key_exists('usuario_solicitante', $body) ? sanitize_email($body['usuario_solicitante']) : $current['usuario_solicitante'],
                 'usuario_responsable' => array_key_exists('usuario_responsable', $body) ? sanitize_email($body['usuario_responsable']) : $current['usuario_responsable'],
+                'fecha_devolucion' => $fecha_devolucion_raw ? PMI_Utils::to_mysql_datetime($fecha_devolucion_raw) : null,
+                'es_indefinido' => $es_indefinido,
+                'devuelto' => $devuelto,
+                'hora_devolucion' => $hora_devolucion,
             ),
             array('id_prestamo' => $id),
-            array('%s', '%s', '%s', '%d', '%s', '%s'),
+            array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%d', '%d', '%s'),
             array('%d')
         );
+
+        // El stock se libera SOLO cuando el equipo vuelve al laboratorio, no
+        // cuando se entrega al solicitante: mientras esta en sus manos sigue
+        // fuera del inventario. Cada detalle devuelve las unidades exactas que
+        // se le habian asignado (ver PMI_Inventario).
+        if ($recien_devuelto) {
+            self::devolver_unidades($id);
+        }
 
         return rest_ensure_response(array('message' => 'Prestamo actualizado'));
     }
@@ -186,7 +341,18 @@ class PMI_Rest_Prestamos
         global $wpdb;
         $id = (int) $request->get_param('id');
 
-        // Igual que el original: primero se borran los detalles asociados.
+        $current = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . PMI_DB::prestamo() . ' WHERE id_prestamo = %d', $id), ARRAY_A);
+        if (!$current) {
+            return new WP_Error('pmi_not_found', 'Prestamo no encontrado', array('status' => 404));
+        }
+
+        // Un prestamo sin devolver tiene unidades reservadas: hay que
+        // devolverlas antes de borrar los detalles que registran cuales son.
+        if ((int) ($current['devuelto'] ?? 0) === 0) {
+            self::devolver_unidades($id);
+        }
+
+        // Primero se borran los detalles asociados.
         $wpdb->delete(PMI_DB::detalle_prestamo(), array('prestamo_id' => $id), array('%d'));
 
         $wpdb->hide_errors();
@@ -202,6 +368,27 @@ class PMI_Rest_Prestamos
         }
 
         return rest_ensure_response(array('message' => 'Prestamo eliminado'));
+    }
+
+    /**
+     * Devuelve al stock las unidades reservadas por todos los detalles de un
+     * prestamo, usando el registro de que unidades concretas se entregaron.
+     *
+     * @param int $id_prestamo Id del prestamo.
+     * @return void
+     */
+    private static function devolver_unidades($id_prestamo)
+    {
+        global $wpdb;
+
+        $detalles = $wpdb->get_results($wpdb->prepare(
+            'SELECT recurso_id, cantidad_prestada, unidades FROM ' . PMI_DB::detalle_prestamo() . ' WHERE prestamo_id = %d',
+            $id_prestamo
+        ), ARRAY_A);
+
+        foreach ($detalles as $detalle) {
+            PMI_Inventario::devolver_detalle($detalle);
+        }
     }
 
     /**
@@ -221,6 +408,10 @@ class PMI_Rest_Prestamos
             'Entregado' => (int) $row['entregado'],
             'usuario_solicitante' => $row['usuario_solicitante'],
             'usuario_responsable' => $row['usuario_responsable'],
+            'fecha_devolucion' => $row['fecha_devolucion'] ?? null,
+            'es_indefinido' => !empty($row['es_indefinido']) ? 1 : 0,
+            'Devuelto' => !empty($row['devuelto']) ? 1 : 0,
+            'Hora_devolucion' => $row['hora_devolucion'] ?? null,
         );
     }
 

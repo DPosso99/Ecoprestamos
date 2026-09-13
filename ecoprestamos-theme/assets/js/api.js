@@ -14,7 +14,7 @@ const NONCE = (window.PMI_CONFIG && window.PMI_CONFIG.nonce) || '';
  * @returns {string} Valor codificado con "@" preservado.
  */
 function encodeSegment(v) {
-  return encodeURIComponent(v).replace(/%40/g, '@');
+  return encodeURIComponent(v).replace(/%40/g, '@').replace(/%2C/g, ',');
 }
 
 /** Error lanzado por `request()` cuando la respuesta HTTP no es `ok`, con el status incluido. */
@@ -126,7 +126,7 @@ export const api = {
    * @param {string} id idRecurso.
    * @returns {Promise<Object>}
    */
-  getResource: (id) => request(`resources/${encodeURIComponent(id)}`),
+  getResource: (id) => request(`resources/${encodeSegment(id)}`),
   /**
    * `POST pmi/v1/resources`. Crea un recurso (multipart, incluye imagen opcional).
    * @param {FormData} formData
@@ -139,20 +139,20 @@ export const api = {
    * @param {FormData} formData
    * @returns {Promise<Object>}
    */
-  updateResource: (id, formData) => request(`resources/${encodeURIComponent(id)}`, { method: 'PUT', body: formData, isForm: true }),
+  updateResource: (id, formData) => request(`resources/${encodeSegment(id)}`, { method: 'PUT', body: formData, isForm: true }),
   /**
    * `DELETE pmi/v1/resources/{id}`. Elimina un recurso.
    * @param {string} id idRecurso.
    * @returns {Promise<*>}
    */
-  deleteResource: (id) => request(`resources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteResource: (id) => request(`resources/${encodeSegment(id)}`, { method: 'DELETE' }),
   /**
    * Construye (sin llamar a `request`) la URL publica de la imagen de un recurso.
    * `GET pmi/v1/resources/{id}/imagen`.
    * @param {string} id idRecurso.
    * @returns {string} URL absoluta de la imagen.
    */
-  resourceImageUrl: (id) => BASE + `resources/${encodeURIComponent(id)}/imagen`,
+  resourceImageUrl: (id) => BASE + `resources/${encodeSegment(id)}/imagen`,
 
   // ---- Prestamos ----
   /**

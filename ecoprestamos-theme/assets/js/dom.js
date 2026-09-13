@@ -35,7 +35,10 @@ export function fmtDT(val) {
   const d = new Date(String(val).replace(' ', 'T'));
   if (isNaN(d.getTime())) return String(val);
   const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const hours = d.getHours();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const h12 = hours % 12 || 12;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} - ${pad(h12)}:${pad(d.getMinutes())} ${ampm}`;
 }
 
 /**

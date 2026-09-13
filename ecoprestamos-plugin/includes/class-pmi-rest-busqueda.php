@@ -59,7 +59,7 @@ class PMI_Rest_Busqueda
     public static function by_tipo(WP_REST_Request $request)
     {
         global $wpdb;
-        $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . PMI_DB::recurso() . ' WHERE tipo = %s', $request->get_param('tipo')), ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT ' . PMI_Rest_Recursos::$select_fields . ' FROM ' . PMI_DB::recurso() . ' WHERE tipo = %s', $request->get_param('tipo')), ARRAY_A);
         if (empty($rows)) {
             return new WP_Error('pmi_not_found', 'No hay recursos de este tipo', array('status' => 404));
         }
@@ -76,7 +76,7 @@ class PMI_Rest_Busqueda
     public static function by_nombre(WP_REST_Request $request)
     {
         global $wpdb;
-        $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . PMI_DB::recurso() . ' WHERE nombre = %s', $request->get_param('nombre')), ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT ' . PMI_Rest_Recursos::$select_fields . ' FROM ' . PMI_DB::recurso() . ' WHERE nombre = %s', $request->get_param('nombre')), ARRAY_A);
         if (empty($rows)) {
             return new WP_Error('pmi_not_found', 'No hay recursos con este nombre', array('status' => 404));
         }
@@ -93,7 +93,7 @@ class PMI_Rest_Busqueda
     public static function by_salon(WP_REST_Request $request)
     {
         global $wpdb;
-        $rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM ' . PMI_DB::recurso() . ' WHERE ubicacion = %s', $request->get_param('ubicacion')), ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT ' . PMI_Rest_Recursos::$select_fields . ' FROM ' . PMI_DB::recurso() . ' WHERE ubicacion = %s', $request->get_param('ubicacion')), ARRAY_A);
         if (empty($rows)) {
             return new WP_Error('pmi_not_found', 'No hay recursos en este salon', array('status' => 404));
         }

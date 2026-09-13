@@ -1,6 +1,8 @@
 // Modal generico (backdrop + panel). Equivalente simplificado de components/Modal.tsx
 // (sin trampa de foco ni animaciones, pero con cierre por ESC/backdrop).
 
+import { escapeHtml } from '../dom.js';
+
 let current = null;
 
 /**
@@ -22,8 +24,8 @@ export function openModal({ title, bodyHtml, footerHtml = '', onMount }) {
   backdrop.innerHTML = `
     <div class="pmi-modal" role="dialog" aria-modal="true">
       <div class="pmi-modal-head">
-        <div class="pmi-title pmi-truncate">${title}</div>
-        <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" id="pmi-modal-close">&times;</button>
+        <div class="pmi-title pmi-truncate" style="font-size:18px;font-weight:700;">${escapeHtml(title)}</div>
+        <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" id="pmi-modal-close" style="width:32px;height:32px;border-radius:50%;padding:0;display:grid;place-items:center;font-size:20px;line-height:1;color:var(--eafit-muted);" aria-label="Cerrar">&times;</button>
       </div>
       <div class="pmi-modal-body">${bodyHtml}</div>
       ${footerHtml ? `<div class="pmi-modal-foot">${footerHtml}</div>` : ''}

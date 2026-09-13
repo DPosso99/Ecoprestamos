@@ -22,20 +22,25 @@ CREATE TABLE %%PREFIX%%usuario (
 ) %%CHARSET%%;
 
 CREATE TABLE %%PREFIX%%recurso (
-  id_recurso varchar(40) NOT NULL,
-  nombre varchar(100) NOT NULL,
+  id_recurso varchar(500) NOT NULL,
+  nombre varchar(255) NOT NULL,
   ubicacion varchar(40) NOT NULL,
-  estado varchar(20) NOT NULL DEFAULT 'Disponible',
+  estado text NOT NULL,
   dia_compra date DEFAULT NULL,
   tipo varchar(30) NOT NULL,
   cantidad_total int DEFAULT NULL,
   cantidad_disponible int DEFAULT NULL,
-  activo varchar(5) DEFAULT 'N/A',
+  activo text DEFAULT NULL,
   imagen longblob,
   imagen_tipo varchar(50) DEFAULT NULL,
   PRIMARY KEY  (id_recurso)
 ) %%CHARSET%%;
 
+-- Ciclo de vida de un prestamo, en tres estados. Son columnas distintas a
+-- proposito: confundirlas hace que el stock se libere cuando no debe.
+--  - entregado/hora_entrega:  el equipo salio hacia el solicitante. Sigue fuera del inventario.
+--  - devuelto/hora_devolucion: el equipo volvio al laboratorio. Aqui se libera el stock.
+--  - fecha_devolucion:        fecha PREVISTA de retorno (nula si es_indefinido = 1).
 CREATE TABLE %%PREFIX%%prestamo (
   id_prestamo bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   notas text,
@@ -44,6 +49,10 @@ CREATE TABLE %%PREFIX%%prestamo (
   entregado tinyint(1) NOT NULL DEFAULT 0,
   usuario_solicitante varchar(150) NOT NULL,
   usuario_responsable varchar(150) NOT NULL,
+  fecha_devolucion datetime DEFAULT NULL,
+  es_indefinido tinyint(1) NOT NULL DEFAULT 0,
+  devuelto tinyint(1) NOT NULL DEFAULT 0,
+  hora_devolucion datetime DEFAULT NULL,
   PRIMARY KEY  (id_prestamo),
   KEY usuario_solicitante (usuario_solicitante),
   KEY usuario_responsable (usuario_responsable)
@@ -52,8 +61,9 @@ CREATE TABLE %%PREFIX%%prestamo (
 CREATE TABLE %%PREFIX%%detalle_prestamo (
   id_detalle bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   prestamo_id bigint(20) unsigned NOT NULL,
-  recurso_id varchar(40) NOT NULL,
+  recurso_id varchar(500) NOT NULL,
   cantidad_prestada int DEFAULT NULL,
+  unidades varchar(500) DEFAULT NULL,
   PRIMARY KEY  (id_detalle),
   KEY prestamo_id (prestamo_id),
   KEY recurso_id (recurso_id)

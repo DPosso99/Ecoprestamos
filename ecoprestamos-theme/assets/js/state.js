@@ -41,7 +41,20 @@ const auth = {
   /** @returns {boolean} true si hay una sesion iniciada. */
   get isAuthed() { return !!auth.user; },
   /** @returns {boolean} true si el usuario actual tiene rol Trabajador. */
-  get isWorker() { return auth.user?.Rol === 'Trabajador'; },
+  get isWorker() {
+    const r = (auth.user?.Rol || auth.user?.rol || '').trim().toLowerCase();
+    return r === 'trabajador';
+  },
+  /** @returns {boolean} true si el usuario actual tiene rol Docente o Profesor. */
+  get isTeacher() {
+    const r = (auth.user?.Rol || auth.user?.rol || '').trim().toLowerCase();
+    return r === 'docente' || r === 'profesor';
+  },
+  /** @returns {boolean} true si el usuario actual tiene rol Estudiante. */
+  get isStudent() {
+    const r = (auth.user?.Rol || auth.user?.rol || '').trim().toLowerCase();
+    return r === 'estudiante';
+  },
 
   /**
    * Inicia sesion contra `POST pmi/v1/login`, guarda el usuario devuelto
@@ -88,7 +101,13 @@ const auth = {
     sessionStorage.removeItem(LS_USER);
     catalog.recursos = [];
     loans.prestamos = [];
+    loans.detailsMap = {};
+    loans.detailsObjectsMap = {};
     users.usuarios = [];
+    // El borrador de la solicitud tambien se descarta: sin esto, el siguiente
+    // usuario que entrara en el mismo navegador veia la seleccion y el
+    // telefono de contacto de la persona anterior.
+    ticket.clear();
     emit();
   },
 };
@@ -155,6 +174,8 @@ const catalog = {
  */
 function normalizeResource(row) {
   const idRecurso = row.idRecurso ?? row.id_recurso;
+  const rawTotal = row.Cantidad_total ?? row.cantidad_total;
+  const rawDisp = row.Cantidad_disponible ?? row.cantidad_disponible;
   return {
     idRecurso,
     Nombre: row.Nombre ?? row.nombre,
@@ -162,8 +183,8 @@ function normalizeResource(row) {
     Estado: row.Estado ?? row.estado,
     Dia_compra: row.Dia_compra ?? row.dia_compra ?? null,
     Tipo: row.Tipo ?? row.tipo,
-    Cantidad_total: row.Cantidad_total ?? row.cantidad_total ?? null,
-    Cantidad_disponible: row.Cantidad_disponible ?? row.cantidad_disponible ?? null,
+    Cantidad_total: rawTotal != null && !isNaN(Number(rawTotal)) ? Number(rawTotal) : null,
+    Cantidad_disponible: rawDisp != null && !isNaN(Number(rawDisp)) ? Number(rawDisp) : null,
     activo: row.activo ?? 'N/A',
     imagenUrl: api.resourceImageUrl(idRecurso),
   };
@@ -180,6 +201,7 @@ function normalizeResource(row) {
 const loans = {
   prestamos: [],
   detailsMap: {},
+  detailsObjectsMap: {},
   loading: false,
 
   /**
@@ -205,18 +227,23 @@ const loans = {
   /**
    * Trae de una vez los detalles (recursos + cantidad) de todos los
    * prestamos via `GET pmi/v1/loans/alldetails`, y arma `detailsMap`
-   * (idPrestamo -> string[] "Nombre ×cantidad") para listados rapidos.
+   * (idPrestamo -> string[] "Nombre ×cantidad") y `detailsObjectsMap`
+   * para listados rapidos y filtrados complejos.
    * @returns {Promise<void>}
    */
   async reloadDetails() {
     try {
       const rows = await api.getAllDetails();
       const map = {};
+      const objMap = {};
       for (const r of (rows || [])) {
         if (!map[r.prestamo_id]) map[r.prestamo_id] = [];
+        if (!objMap[r.prestamo_id]) objMap[r.prestamo_id] = [];
         map[r.prestamo_id].push(`${r.Nombre} ×${r.cantidad_prestada ?? 1}`);
+        objMap[r.prestamo_id].push(r);
       }
       loans.detailsMap = map;
+      loans.detailsObjectsMap = objMap;
     } catch { /* no bloquea */ }
   },
 
@@ -236,12 +263,16 @@ const loans = {
     try {
       const rows = await api.getLoanDetails(id);
       return (rows || []).map((r) => ({
-        recursoId: r.recurso_id,
-        nombre: r.Nombre,
-        tipo: r.Tipo,
-        ubicacion: r.Ubicacion,
-        estado: r.Estado,
+        recursoId: r.recurso_id || r.idRecurso || r.id_recurso,
+        nombre: r.Nombre || r.nombre,
+        tipo: r.Tipo || r.tipo,
+        ubicacion: r.Ubicacion || r.ubicacion,
+        estado: r.Estado || r.estado,
+        activo: r.activo || r.Activo || 'N/A',
         cantidad: r.cantidad_prestada ?? 1,
+        // Unidades fisicas concretas que se asignaron a este prestamo, para
+        // que el trabajador sepa cual entregar y cual espera de vuelta.
+        unidades: String(r.unidades || '').split(',').map((u) => u.trim()).filter(Boolean),
       }));
     } catch {
       return [];
@@ -260,18 +291,22 @@ const loans = {
    * @param {Array<{id: string, cantidad: number}>} datos.recursos
    * @returns {Promise<number>} El idPrestamo creado.
    */
-  async crearPrestamo({ Notas, Fecha_prestamo, usuario_solicitante, usuario_responsable, recursos }) {
+  async crearPrestamo({ Notas, Fecha_prestamo, usuario_solicitante, usuario_responsable, recursos, fecha_devolucion, es_indefinido }) {
+    // El prestamo y sus recursos van en una sola peticion: el backend los
+    // registra en una transaccion. Antes eran dos llamadas y, si fallaba la
+    // segunda (p. ej. sin stock), quedaba un prestamo vacio que el estudiante
+    // no podia borrar y le bloqueaba cualquier solicitud nueva.
     const data = await api.createLoan({
       Notas, Fecha_prestamo, Hora_entrega: null, Entregado: 0,
       usuario_solicitante, usuario_responsable,
+      fecha_devolucion: fecha_devolucion || null,
+      es_indefinido: es_indefinido ? 1 : 0,
+      recursos,
     });
-    const idPrestamo = data.idPrestamo;
-    if (recursos.length > 0) {
-      await api.addLoanDetails(idPrestamo, recursos);
-    }
+    ticket.clear();
     await loans.reload();
     await catalog.reload();
-    return idPrestamo;
+    return data.idPrestamo;
   },
 
   /**
@@ -282,6 +317,19 @@ const loans = {
    */
   async marcarEntregado(idPrestamo) {
     await api.updateLoan(idPrestamo, { Entregado: 1, Hora_entrega: localDateTimeISO() });
+    await loans.reload();
+    await catalog.reload();
+  },
+
+  /**
+   * Registra la devolucion de un prestamo (`PUT pmi/v1/loans/:id`) con la
+   * hora actual. Es el paso que devuelve las unidades al inventario, asi que
+   * recarga tambien el catalogo.
+   * @param {number} idPrestamo
+   * @returns {Promise<void>}
+   */
+  async marcarDevuelto(idPrestamo) {
+    await api.updateLoan(idPrestamo, { Devuelto: 1, Hora_devolucion: localDateTimeISO() });
     await loans.reload();
     await catalog.reload();
   },
@@ -302,8 +350,34 @@ function normalizeLoan(row) {
     Entregado: Number(row.Entregado ?? row.entregado ?? 0),
     usuario_solicitante: row.usuario_solicitante,
     usuario_responsable: row.usuario_responsable,
+    fecha_devolucion: row.fecha_devolucion ?? row.Fecha_devolucion ?? null,
+    es_indefinido: Number(row.es_indefinido ?? row.Es_indefinido ?? 0),
+    // Entregado y Devuelto son hitos distintos: Entregado = el equipo salio
+    // hacia el solicitante (sigue fuera del inventario), Devuelto = volvio al
+    // laboratorio (ahi se libera el stock). fecha_devolucion es la fecha
+    // PREVISTA de retorno; Hora_devolucion, la real.
+    Devuelto: Number(row.Devuelto ?? row.devuelto ?? 0),
+    Hora_devolucion: row.Hora_devolucion ?? row.hora_devolucion ?? null,
   };
 }
+
+/**
+ * Estado del ciclo de vida de un prestamo, para pintar etiquetas y filtrar.
+ * @param {Object} prestamo Prestamo normalizado.
+ * @returns {'pendiente'|'afuera'|'devuelto'}
+ */
+export function loanEstado(prestamo) {
+  if (prestamo.Devuelto) return 'devuelto';
+  if (prestamo.Entregado) return 'afuera';
+  return 'pendiente';
+}
+
+/** Etiquetas legibles de cada estado del ciclo de vida. */
+export const LOAN_ESTADO_LABEL = {
+  pendiente: 'Pendiente entrega',
+  afuera: 'En prestamo',
+  devuelto: 'Devuelto',
+};
 
 /**
  * Formatea una fecha local (sin conversion a UTC) como `YYYY-MM-DDTHH:mm:ss`,
@@ -346,10 +420,15 @@ const users = {
   },
 
   /**
-   * @param {string} correo Correo a buscar.
-   * @returns {Object|undefined} El usuario con ese correo, si existe en cache.
+   * Busca un usuario por correo de forma insensible a mayúsculas.
+   * @param {string} correo
+   * @returns {Object|undefined}
    */
-  getByCorreo(correo) { return users.usuarios.find((u) => u.Correo === correo); },
+  getByCorreo(correo) {
+    if (!correo) return undefined;
+    const norm = String(correo).trim().toLowerCase();
+    return users.usuarios.find((u) => (u.Correo || '').trim().toLowerCase() === norm);
+  },
 };
 
 // =========================
@@ -359,9 +438,13 @@ const users = {
 const initialDraft = () => ({
   selectedIds: [],
   quantities: {},
+  unidadesElegidas: {},
   fechaPrestamo: undefined,
   horaPrestamo: undefined,
+  fechaDevolucion: undefined,
+  esIndefinido: false,
   Notas: '',
+  contacto: '',
   responsableCorreo: undefined,
   responsableNombre: undefined,
   acceptCampusRule: false,
@@ -389,6 +472,7 @@ const ticket = {
     if (has) {
       ticket.draft.selectedIds = ticket.draft.selectedIds.filter((x) => x !== id);
       delete ticket.draft.quantities[id];
+      delete ticket.draft.unidadesElegidas[id];
     } else {
       if (opts.canAdd === false) return;
       ticket.draft.selectedIds = [...ticket.draft.selectedIds, id];
@@ -400,13 +484,40 @@ const ticket = {
   /**
    * Actualiza la cantidad solicitada de un recurso ya seleccionado
    * (no-op si el recurso no esta en el borrador). El valor se redondea y
-   * se limita a un minimo de 1.
+   * se limita a un minimo de 1. Si la cantidad cambia, se descarta la
+   * eleccion manual de unidades hecha en el catalogo (ver
+   * `setUnidadesElegidas`): ya no corresponde en numero, y el backend vuelve
+   * a asignar automaticamente las primeras unidades libres.
    * @param {string} id idRecurso.
    * @param {number} qty Cantidad deseada.
    */
   setQuantity(id, qty) {
     if (!ticket.draft.selectedIds.includes(id)) return;
-    ticket.draft.quantities[id] = Math.max(1, Math.round(qty));
+    const nextQty = Math.max(1, Math.round(qty));
+    ticket.draft.quantities[id] = nextQty;
+    const elegidas = ticket.draft.unidadesElegidas[id];
+    if (elegidas && elegidas.length !== nextQty) {
+      delete ticket.draft.unidadesElegidas[id];
+    }
+    emit();
+  },
+
+  /**
+   * Guarda (o borra, si `unidades` viene vacio) la eleccion manual de
+   * unidades fisicas concretas para un recurso ya seleccionado, hecha desde
+   * el modal de detalle del catalogo. Es opcional: si no se llama, o se
+   * borra, el backend asigna automaticamente las primeras unidades libres al
+   * confirmar la solicitud.
+   * @param {string} id idRecurso.
+   * @param {string[]} unidades Ids de unidad elegidos, del mismo largo que la cantidad del recurso.
+   */
+  setUnidadesElegidas(id, unidades) {
+    if (!ticket.draft.selectedIds.includes(id)) return;
+    if (!unidades || unidades.length === 0) {
+      delete ticket.draft.unidadesElegidas[id];
+    } else {
+      ticket.draft.unidadesElegidas[id] = [...unidades];
+    }
     emit();
   },
 
@@ -418,6 +529,7 @@ const ticket = {
   removeSelected(id) {
     ticket.draft.selectedIds = ticket.draft.selectedIds.filter((x) => x !== id);
     delete ticket.draft.quantities[id];
+    delete ticket.draft.unidadesElegidas[id];
     emit();
   },
 
@@ -427,8 +539,14 @@ const ticket = {
   setHoraPrestamo(t) { ticket.draft.horaPrestamo = t || undefined; emit(); },
   /** @param {string} n Notas libres de la solicitud. */
   setNotas(n) { ticket.draft.Notas = n ?? ''; },
+  /** @param {string} c Telefono/celular de contacto obligatorio. */
+  setContacto(c) { ticket.draft.contacto = c ?? ''; emit(); },
   /** @param {boolean} v Acepta que los recursos no salen del campus. */
   setAcceptCampusRule(v) { ticket.draft.acceptCampusRule = v; emit(); },
+  /** @param {string|undefined} d Fecha (YYYY-MM-DD) esperada de devolucion. */
+  setFechaDevolucion(d) { ticket.draft.fechaDevolucion = d || undefined; emit(); },
+  /** @param {boolean} v true si el prestamo es por tiempo indefinido. */
+  setEsIndefinido(v) { ticket.draft.esIndefinido = !!v; emit(); },
   /** @param {boolean} v Acepta las condiciones del prestamo. */
   setAcceptTerms(v) { ticket.draft.acceptTerms = v; emit(); },
   /**

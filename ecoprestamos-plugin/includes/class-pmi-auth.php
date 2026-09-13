@@ -51,6 +51,32 @@ class PMI_Auth
     }
 
     /**
+     * Huella de las credenciales actuales de un usuario, derivada de su hash
+     * de contrasena. Va dentro de la cookie firmada para que un cambio de
+     * contrasena invalide las sesiones abiertas: la cookie es autocontenida
+     * (no hay tabla de sesiones que borrar), asi que sin esto un token
+     * copiado seguiria sirviendo las 24 horas completas.
+     *
+     * @param string $correo Correo del usuario.
+     * @return string Huella corta, o cadena vacia si el usuario no existe.
+     */
+    private static function credential_fingerprint($correo)
+    {
+        global $wpdb;
+
+        $hash = $wpdb->get_var($wpdb->prepare(
+            'SELECT contrasena FROM ' . PMI_DB::usuario() . ' WHERE correo = %s',
+            $correo
+        ));
+
+        if (!$hash) {
+            return '';
+        }
+
+        return substr(hash_hmac('sha256', $hash, self::secret()), 0, 16);
+    }
+
+    /**
      * Crea el valor de cookie de sesion para un usuario ya autenticado.
      *
      * @param string $correo Correo del usuario autenticado.
@@ -61,6 +87,7 @@ class PMI_Auth
         $payload = base64_encode(wp_json_encode(array(
             'correo' => $correo,
             'exp' => time() + self::SESSION_TTL,
+            'fp' => self::credential_fingerprint($correo),
         )));
         $signature = self::sign($payload);
         $token = $payload . '.' . $signature;
@@ -102,11 +129,11 @@ class PMI_Auth
     }
 
     /**
-     * Verifica la cookie de la request actual y devuelve el correo si es valida.
+     * Verifica la cookie de la request actual y devuelve su contenido si es valida.
      *
-     * @return string|null Correo del usuario si la cookie es valida y no expiro, o null en caso contrario.
+     * @return array|null Datos de la sesion (correo, exp, fp), o null si la cookie falta, no verifica o expiro.
      */
-    private static function correo_from_cookie()
+    private static function session_data()
     {
         if (empty($_COOKIE[self::COOKIE_NAME])) {
             return null;
@@ -133,7 +160,7 @@ class PMI_Auth
             return null;
         }
 
-        return $data['correo'];
+        return $data;
     }
 
     /**
@@ -149,21 +176,71 @@ class PMI_Auth
         }
         self::$current_user_loaded = true;
 
-        $correo = self::correo_from_cookie();
-        if (!$correo) {
+        $session = self::session_data();
+        if (!$session) {
             return self::$current_user = null;
         }
 
         global $wpdb;
         $row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT correo, numero, rol, nombre, baneado, trabajo FROM ' . PMI_DB::usuario() . ' WHERE correo = %s',
-                $correo
+                'SELECT correo, numero, rol, nombre, baneado, trabajo, contrasena FROM ' . PMI_DB::usuario() . ' WHERE correo = %s',
+                $session['correo']
             ),
             ARRAY_A
         );
 
-        return self::$current_user = $row ?: null;
+        if (!$row) {
+            return self::$current_user = null;
+        }
+
+        // Si la contrasena cambio despues de emitirse la cookie, la huella ya
+        // no coincide y la sesion deja de valer. Las cookies emitidas antes de
+        // que existiera la huella tampoco pasan: obligan a entrar de nuevo.
+        $fingerprint = substr(hash_hmac('sha256', $row['contrasena'], self::secret()), 0, 16);
+        if (empty($session['fp']) || !hash_equals($fingerprint, (string) $session['fp'])) {
+            return self::$current_user = null;
+        }
+
+        // El hash no debe salir de aqui: varios endpoints devuelven al cliente
+        // la fila del usuario autenticado.
+        unset($row['contrasena']);
+
+        return self::$current_user = $row;
+    }
+
+    /**
+     * Correo del usuario autenticado, o null si no hay sesion.
+     *
+     * @return string|null
+     */
+    public static function correo()
+    {
+        $user = self::current_user();
+        return $user ? $user['correo'] : null;
+    }
+
+    /**
+     * Indica si el usuario autenticado esta baneado.
+     *
+     * @return bool
+     */
+    public static function is_banned()
+    {
+        $user = self::current_user();
+        return $user && !empty($user['baneado']);
+    }
+
+    /**
+     * Indica si el correo dado es el del usuario autenticado.
+     *
+     * @param string $correo Correo a comparar.
+     * @return bool
+     */
+    public static function is_self($correo)
+    {
+        $actual = self::correo();
+        return $actual !== null && strcasecmp((string) $correo, $actual) === 0;
     }
 
     /**
@@ -212,9 +289,44 @@ class PMI_Auth
         if (!self::is_logged_in()) {
             return new WP_Error('pmi_no_auth', 'No autenticado', array('status' => 401));
         }
+        if (self::is_banned()) {
+            return new WP_Error('pmi_banned', 'Tu cuenta esta suspendida. Comunicate con Medialab.', array('status' => 403));
+        }
         if (in_array($request->get_method(), array('POST', 'PUT', 'DELETE'), true) && !self::verify_nonce($request)) {
             return new WP_Error('pmi_bad_nonce', 'Nonce invalido o ausente', array('status' => 403));
         }
+        return true;
+    }
+
+    /**
+     * permission_callback de GET /users/{correo}. Cada usuario puede leer su
+     * propio registro y un Trabajador puede leer cualquiera; nadie mas.
+     *
+     * A diferencia del resto, un usuario baneado SI puede leer su propia fila:
+     * es asi como la aplicacion se entera del baneo y muestra la pantalla de
+     * cuenta suspendida en vez de una pantalla vacia.
+     *
+     * @param WP_REST_Request $request Request actual.
+     * @return true|WP_Error
+     */
+    public static function permission_read_user(WP_REST_Request $request)
+    {
+        if (!self::is_logged_in()) {
+            return new WP_Error('pmi_no_auth', 'No autenticado', array('status' => 401));
+        }
+
+        if (self::is_self(urldecode((string) $request->get_param('correo')))) {
+            return true;
+        }
+
+        if (self::is_banned()) {
+            return new WP_Error('pmi_banned', 'Tu cuenta esta suspendida. Comunicate con Medialab.', array('status' => 403));
+        }
+
+        if (!self::is_worker()) {
+            return new WP_Error('pmi_forbidden', 'Solo puedes consultar tu propio usuario', array('status' => 403));
+        }
+
         return true;
     }
 

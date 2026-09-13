@@ -1,0 +1,23 @@
+# Finales de linea.
+#
+# En Windows, core.autocrlf=true deja CRLF en la copia de trabajo. Un script de
+# shell con CRLF deja de ejecutarse ("bad interpreter: /usr/bin/env"), asi que
+# los scripts y el codigo se fuerzan a LF. Los binarios no se tocan.
+* text=auto
+
+*.sh   text eol=lf
+*.php  text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.sql  text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.svg  text eol=lf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.zip  binary

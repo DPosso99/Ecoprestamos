@@ -9,3 +9,22 @@ Thumbs.db
 
 # Por si alguna vez se agrega tooling local
 node_modules/
+
+# Paquete de entrega: se reconstruye con ./build-dist.sh y contiene el volcado
+# SQL con datos semilla (credenciales y telefonos), asi que no se versiona.
+dist/
+
+# Volcados de la base de datos: llevan datos reales (correos, telefonos y las
+# imagenes del catalogo en binario). Los del plugin (ecoprestamos-plugin/sql/)
+# si se versionan: esos son el esquema, no datos.
+local_*.sql
+/*.sql
+
+# Herramientas de prueba y diagnostico: llevan credenciales del sitio local y
+# los hashes de las cuentas. Se quedan en la maquina.
+scratch/
+__pycache__/
+*.pyc
+
+# Configuracion local del agente (permisos de esta maquina)
+.claude/settings.local.json

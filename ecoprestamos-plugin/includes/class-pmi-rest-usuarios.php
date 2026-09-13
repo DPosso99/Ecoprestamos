@@ -8,7 +8,31 @@ if (!defined('ABSPATH')) {
  */
 class PMI_Rest_Usuarios
 {
+    /**
+     * Contrasena con la que queda una cuenta creada por un Trabajador que no
+     * indico una. Es de un solo uso: la persona debe cambiarla al entrar.
+     */
     const DEFAULT_TEMP_PASSWORD = 'Medialab2026!';
+
+    /** Roles validos. Cualquier otro valor dejaria al usuario sin permisos utiles. */
+    const ROLES = array('Estudiante', 'Docente', 'Trabajador');
+
+    /** Valores validos de "trabajo" (solo aplica a rol Trabajador). */
+    const TRABAJOS = array('Trabajador', 'Practicante');
+
+    /**
+     * Normaliza un valor contra una lista blanca.
+     *
+     * @param mixed  $valor       Valor recibido del cliente.
+     * @param array  $permitidos  Valores aceptados.
+     * @param string $por_defecto Valor a usar si el recibido no esta en la lista.
+     * @return string
+     */
+    private static function whitelist($valor, array $permitidos, $por_defecto)
+    {
+        $valor = sanitize_text_field((string) $valor);
+        return in_array($valor, $permitidos, true) ? $valor : $por_defecto;
+    }
 
     /**
      * Registra las rutas CRUD de usuarios y las rutas de login/logout bajo
@@ -22,7 +46,7 @@ class PMI_Rest_Usuarios
             array(
                 'methods' => 'GET',
                 'callback' => array(__CLASS__, 'get_users'),
-                'permission_callback' => array('PMI_Auth', 'permission_worker'),
+                'permission_callback' => array('PMI_Auth', 'permission_logged_in'),
             ),
             array(
                 'methods' => 'POST',
@@ -35,7 +59,7 @@ class PMI_Rest_Usuarios
             array(
                 'methods' => 'GET',
                 'callback' => array(__CLASS__, 'get_user'),
-                'permission_callback' => array('PMI_Auth', 'permission_logged_in'),
+                'permission_callback' => array('PMI_Auth', 'permission_read_user'),
             ),
             array(
                 'methods' => 'PUT',
@@ -92,14 +116,27 @@ class PMI_Rest_Usuarios
     }
 
     /**
-     * GET /users: lista todos los usuarios (sin contrasena). Requiere rol Trabajador.
+     * GET /users: directorio de usuarios (sin contrasena). Un Trabajador ve
+     * todo el directorio; los demas roles solo ven a los trabajadores activos,
+     * que es lo que necesitan para elegir el encargado de una solicitud, y sin
+     * datos de contacto.
      *
      * @return WP_REST_Response Lista de usuarios.
      */
     public static function get_users()
     {
         global $wpdb;
-        $rows = $wpdb->get_results('SELECT correo, numero, rol, nombre, baneado, trabajo FROM ' . PMI_DB::usuario(), ARRAY_A);
+
+        if (PMI_Auth::is_worker()) {
+            $rows = $wpdb->get_results('SELECT correo, numero, rol, nombre, baneado, trabajo FROM ' . PMI_DB::usuario(), ARRAY_A);
+            return rest_ensure_response($rows);
+        }
+
+        $rows = $wpdb->get_results($wpdb->prepare(
+            'SELECT correo, rol, nombre, trabajo FROM ' . PMI_DB::usuario() . ' WHERE rol = %s AND baneado = 0',
+            'Trabajador'
+        ), ARRAY_A);
+
         return rest_ensure_response($rows);
     }
 
@@ -167,9 +204,9 @@ class PMI_Rest_Usuarios
         // De lo contrario cualquier visitante anonimo podria auto-asignarse
         // Rol=Trabajador con un simple POST.
         if ($admin_created) {
-            $rol = sanitize_text_field($body['Rol'] ?? 'Estudiante');
+            $rol = self::whitelist($body['Rol'] ?? 'Estudiante', self::ROLES, 'Estudiante');
             $baneado = !empty($body['Baneado']) ? 1 : 0;
-            $trabajo = isset($body['Trabajo']) ? sanitize_text_field($body['Trabajo']) : null;
+            $trabajo = isset($body['Trabajo']) ? self::whitelist($body['Trabajo'], self::TRABAJOS, 'Practicante') : null;
         } else {
             $rol = 'Estudiante';
             $baneado = 0;
@@ -238,8 +275,7 @@ class PMI_Rest_Usuarios
             return new WP_Error('pmi_not_found', 'Usuario no encontrado', array('status' => 404));
         }
 
-        $acting_user = PMI_Auth::current_user();
-        $is_self = $acting_user && $acting_user['correo'] === $correo;
+        $is_self = PMI_Auth::is_self($correo);
         $is_worker = PMI_Auth::is_worker();
 
         if (!$is_self && !$is_worker) {
@@ -251,9 +287,9 @@ class PMI_Rest_Usuarios
         $baneado = $current['baneado'];
         $trabajo = $current['trabajo'];
         if ($is_worker) {
-            $rol = array_key_exists('Rol', $body) ? sanitize_text_field($body['Rol']) : $rol;
+            $rol = array_key_exists('Rol', $body) ? self::whitelist($body['Rol'], self::ROLES, $rol) : $rol;
             $baneado = array_key_exists('Baneado', $body) ? (int) (bool) $body['Baneado'] : $baneado;
-            $trabajo = array_key_exists('Trabajo', $body) ? $body['Trabajo'] : $trabajo;
+            $trabajo = array_key_exists('Trabajo', $body) ? self::whitelist($body['Trabajo'], self::TRABAJOS, $trabajo) : $trabajo;
         }
 
         $numero = array_key_exists('numero', $body) ? sanitize_text_field($body['numero']) : $current['numero'];
@@ -262,6 +298,15 @@ class PMI_Rest_Usuarios
         $contrasena_plain = $body['Contraseña'] ?? $body['Contrasena'] ?? null;
         $hash = $current['contrasena'];
         if ($contrasena_plain && !password_verify($contrasena_plain, $current['contrasena'])) {
+            // Cambiar su propia contrasena exige conocer la actual: si no, una
+            // sesion robada basta para quedarse con la cuenta. Un Trabajador
+            // que le restablece la clave a otra persona no la necesita.
+            if ($is_self) {
+                $actual = $body['Contrasena_actual'] ?? $body['Contraseña_actual'] ?? '';
+                if (!$actual || !password_verify($actual, $current['contrasena'])) {
+                    return new WP_Error('pmi_forbidden', 'Debes confirmar tu contrasena actual para cambiarla', array('status' => 403));
+                }
+            }
             $hash = password_hash($contrasena_plain, PASSWORD_BCRYPT);
         }
 
@@ -327,6 +372,13 @@ class PMI_Rest_Usuarios
         $body = $request->get_json_params();
         $correo = sanitize_email($body['Correo'] ?? '');
         $contrasena = $body['Contraseña'] ?? $body['Contrasena'] ?? '';
+
+        // El correo institucional se exige al registrarse (ver create_user),
+        // no aqui: un Trabajador puede dar de alta cuentas con otro dominio
+        // (proveedores, invitados) y esas tambien tienen que poder entrar.
+        if (!$correo) {
+            return new WP_Error('pmi_bad_credentials', 'Correo o contrasena incorrectos', array('status' => 401));
+        }
 
         $user = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . PMI_DB::usuario() . ' WHERE correo = %s', $correo), ARRAY_A);
 

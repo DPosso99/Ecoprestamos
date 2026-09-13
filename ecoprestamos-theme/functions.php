@@ -14,7 +14,8 @@ add_action('wp_enqueue_scripts', function () {
     wp_enqueue_style('ecoprestamos-theme-style', get_stylesheet_directory_uri() . '/style.css');
 
     $assets_uri = get_stylesheet_directory_uri() . '/assets';
-    $version = defined('PMI_VERSION') ? PMI_VERSION : '1.0.0';
+    $app_file = get_stylesheet_directory() . '/assets/js/app.js';
+    $version = (defined('WP_DEBUG') && WP_DEBUG) ? time() : (file_exists($app_file) ? filemtime($app_file) : '1.0.2');
 
     wp_enqueue_style('pmi-app', $assets_uri . '/css/app.css', array(), $version);
 
@@ -26,6 +27,9 @@ add_action('wp_enqueue_scripts', function () {
         'nonce' => wp_create_nonce('wp_rest'),
         'pluginVersion' => defined('PMI_VERSION') ? PMI_VERSION : '',
         'themeVersion' => $version,
+        'themeUrl' => get_stylesheet_directory_uri(),
+        'logoUrl' => get_stylesheet_directory_uri() . '/pix/Logo_EAFIT.svg',
+        'mascotUrl' => get_stylesheet_directory_uri() . '/pix/Armadillo_libro.png',
     ));
 });
 
